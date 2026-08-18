@@ -1,4 +1,4 @@
-"""Validation metrics for full-image crowd counting."""
+"""整图人群计数的验证指标。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def evaluate_tiled(
     tiler: DensityTiler | None = None,
     device: str | torch.device | None = None,
 ) -> dict[str, float]:
-    """Evaluate deterministic full images; each sample is ``(image, count_gt)``."""
+    """评估确定性的整图；每个样本为 ``(image, count_gt)``。"""
 
     tiler = tiler or DensityTiler()
     predictions: list[torch.Tensor] = []

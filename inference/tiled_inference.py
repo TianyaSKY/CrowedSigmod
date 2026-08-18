@@ -1,4 +1,4 @@
-"""Overlap-aware tiled inference for full-resolution crowd images."""
+"""面向全分辨率人群图像、考虑重叠的分块推理。"""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ def _tile_starts(length: int, tile_size: int, stride: int, alignment: int = 1) -
     starts = list(range(0, length - tile_size + 1, stride))
     last = length - tile_size
     if starts[-1] != last:
-        # Keep the final origin aligned to the model output grid; padding then
-        # covers the remaining pixels without leaving zero-weight cells.
+        # 保持最后一个起点与模型输出网格对齐；随后的填充
+        # 覆盖剩余像素，不留下零权重单元。
         aligned_last = max(0, last - (last % max(alignment, 1)))
         if aligned_last not in starts:
             starts.append(aligned_last)
@@ -31,7 +31,7 @@ def _tile_starts(length: int, tile_size: int, stride: int, alignment: int = 1) -
 
 
 def cosine_blend_window(height: int, width: int, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-    """Positive 2-D cosine window; unlike Hann it never leaves zero coverage."""
+    """正的二维余弦窗；与 Hann 窗不同，它不会留下零覆盖区域。"""
 
     y = torch.arange(height, device=device, dtype=dtype)
     x = torch.arange(width, device=device, dtype=dtype)
@@ -49,11 +49,11 @@ def predict_tiled(
     output_stride: int = 4,
     device: str | torch.device | None = None,
 ) -> TiledPrediction:
-    """Run a model on overlapping tiles and blend density at output resolution.
+    """在重叠的分块上运行模型，并在输出分辨率下融合密度。
 
-    Density, not per-tile counts, is stitched.  A tile's density is placed at
-    its stride-reduced origin and combined with a positive cosine mask, then
-    divided by the accumulated mask.  This avoids counting overlap twice.
+    拼接的是密度而非每块的人数。每个分块的密度被放置在按步长缩小后的
+    起点处，并与正余弦掩码相乘累加，再除以累加得到的掩码。这样可以避免
+    重叠区域被重复计数。
     """
 
     if tile_size <= 0 or tile_stride <= 0 or output_stride <= 0:
@@ -104,7 +104,7 @@ def predict_tiled(
 
 
 class DensityTiler:
-    """Callable wrapper retaining tiling settings for validation/inference."""
+    """可调用包装器，保留分块设置以供验证/推理使用。"""
 
     def __init__(self, tile_size: int = 640, tile_stride: int = 512, output_stride: int = 4) -> None:
         self.tile_size = tile_size

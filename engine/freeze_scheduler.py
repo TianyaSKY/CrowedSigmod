@@ -1,4 +1,4 @@
-"""Backbone freeze schedule and optimizer parameter groups."""
+"""骨干网络冻结调度与优化器参数分组。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _set_batch_norm_eval(module: nn.Module) -> None:
 
 
 class FreezeScheduler:
-    """Apply frozen → partially unfrozen → fully unfrozen transitions."""
+    """应用冻结 → 部分解冻 → 完全解冻的过渡。"""
 
     def __init__(self, freeze_epochs: int = 10, partial_unfreeze_epoch: int = 10, full_unfreeze_epoch: int = 30) -> None:
         if not (0 <= freeze_epochs <= partial_unfreeze_epoch <= full_unfreeze_epoch):
@@ -74,17 +74,17 @@ class FreezeScheduler:
             for parameter in low + high:
                 parameter.requires_grad = True
 
-        # All newly initialized heads remain trainable in every phase.
+        # 所有新建的头部在每一阶段都保持可训练。
         for name, module in model.named_children():
             if name != "backbone":
                 _set_module_trainable(module, True)
-        # A frozen backbone must not update running BN statistics.  Applying this
-        # after model.train() keeps the invariant true at every phase transition.
+        # 冻结的骨干网络不得更新运行中的 BN 统计量。在 model.train() 之后
+        # 应用此设置，可在每个阶段切换时保持该不变式成立。
         self.enforce_batch_norm_state(model)
         return phase
 
     def enforce_batch_norm_state(self, model: nn.Module) -> None:
-        """Re-apply frozen-backbone BN eval after an outer ``model.train()``."""
+        """在外部调用 ``model.train()`` 后，重新对冻结的骨干网络 BN 应用 eval 模式。"""
 
         if self.phase is not TrainingPhase.FULL:
             _set_batch_norm_eval(model.backbone)
@@ -116,7 +116,7 @@ def build_optimizer(
     backbone_high_multiplier: float = 0.1,
     backbone_low_multiplier: float = 0.03,
 ) -> torch.optim.Optimizer:
-    """Create AdamW groups for heads, neck, and backbone stages."""
+    """为头部、颈部与骨干网络各阶段创建 AdamW 参数组。"""
 
     low, high = model.backbone.backbone_stage_parameters()
     low_set = {id(parameter) for parameter in low}

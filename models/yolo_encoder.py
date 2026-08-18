@@ -1,4 +1,4 @@
-"""YOLO-style multi-scale encoders with an optional Ultralytics backend."""
+"""YOLO 风格的多尺度编码器，可选使用 Ultralytics 后端。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 
 class ConvBNAct(nn.Module):
-    """The compact Conv-BN-SiLU primitive used by the fallback encoder."""
+    """后备编码器使用的紧凑 Conv-BN-SiLU 基础模块。"""
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, stride: int = 1) -> None:
         super().__init__()
@@ -26,7 +26,7 @@ class ConvBNAct(nn.Module):
 
 
 class ResidualC2f(nn.Module):
-    """A small residual block shaped like a YOLO C2f/C3 block."""
+    """仿照 YOLO C2f/C3 模块设计的小型残差块。"""
 
     def __init__(self, channels: int, expansion: float = 0.5) -> None:
         super().__init__()
@@ -45,7 +45,7 @@ class ResidualC2f(nn.Module):
 
 
 class LightweightYOLOBackbone(nn.Module):
-    """Dependency-free P2/P3/P4 encoder used when Ultralytics is unavailable."""
+    """Ultralytics 不可用时使用的无依赖 P2/P3/P4 编码器。"""
 
     feature_channels = (64, 128, 256)
     output_stride = 4
@@ -68,11 +68,11 @@ class LightweightYOLOBackbone(nn.Module):
 
 
 class UltralyticsYOLOBackbone(nn.Module):
-    """Reuse the backbone layers from an Ultralytics YOLO YAML or checkpoint.
+    """复用来自 Ultralytics YOLO YAML 或检查点的骨干网络层。
 
-    YOLO11's backbone emits P2/P3/P4 after layers 2/4/6.  The detection neck
-    and Detect head are intentionally not copied, so the crowd model owns the
-    rest of the computation and never produces box logits.
+    YOLO11 的骨干网络在第 2/4/6 层之后输出 P2/P3/P4。检测颈部（neck）
+    和 Detect 头有意不复制，因此人群模型拥有其余的计算，
+    且永远不会产生边界框 logits。
     """
 
     output_stride = 4
@@ -122,7 +122,7 @@ class UltralyticsYOLOBackbone(nn.Module):
 
 
 class YOLOBackbone(nn.Module):
-    """Select Ultralytics when available, with a deterministic local fallback."""
+    """可用时选择 Ultralytics，并提供确定性的本地后备方案。"""
 
     output_stride = 4
 
@@ -139,9 +139,9 @@ class YOLOBackbone(nn.Module):
         if use_ultralytics:
             try:
                 backend = UltralyticsYOLOBackbone(model_name=model_name, pretrained=pretrained)
-            except Exception as exc:  # keep local tests and offline runs usable
+            except Exception as exc:  # 保证本地测试与离线运行可用
                 warnings.warn(
-                    f"Falling back to the local YOLO-style encoder because Ultralytics initialization failed: {exc}",
+                    f"由于 Ultralytics 初始化失败，回退到本地 YOLO 风格编码器：{exc}",
                     RuntimeWarning,
                     stacklevel=2,
                 )
@@ -159,7 +159,7 @@ class YOLOBackbone(nn.Module):
         return getattr(self.backend, "layers", None)
 
     def backbone_stage_parameters(self, high_only: bool = False) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
-        """Return low/high parameter lists for staged unfreezing."""
+        """返回用于分阶段解冻的低层/高层参数列表。"""
 
         if isinstance(self.backend, LightweightYOLOBackbone):
             low_modules = (self.backend.stem, self.backend.stage1, self.backend.stage2)

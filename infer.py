@@ -1,4 +1,4 @@
-"""Run full-image tiled crowd counting."""
+"""对整图进行分块人群计数。"""
 
 from __future__ import annotations
 

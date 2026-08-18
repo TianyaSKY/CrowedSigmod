@@ -1,4 +1,4 @@
-"""Crowd-counter model components."""
+"""人群计数器模型组件。"""
 
 from .attention import ECAChannelAttention, ProbabilityGuidedAttention
 from .crowd_counter import CrowdCounter

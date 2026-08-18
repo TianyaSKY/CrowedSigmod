@@ -1,4 +1,4 @@
-"""Multi-Scale Residual (MSR) density refinement blocks."""
+"""多尺度残差（MSR）密度细化模块。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from .yolo_encoder import ConvBNAct
 
 
 class MSRBlock(nn.Module):
-    """Parallel dilated convolutions followed by a residual projection."""
+    """并行空洞卷积，随后进行残差投影。"""
 
     def __init__(
         self,

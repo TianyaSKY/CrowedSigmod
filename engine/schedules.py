@@ -1,4 +1,4 @@
-"""Warmup plus cosine learning-rate scheduling."""
+"""预热加余弦学习率调度。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import torch
 
 
 def warmup_cosine_factor(epoch: int, total_epochs: int, warmup_epochs: int) -> float:
-    """Return a scalar LR multiplier for the start of ``epoch``."""
+    """返回 ``epoch`` 开始时的标量学习率乘数。"""
 
     if total_epochs <= 0:
         raise ValueError("total_epochs must be positive")
@@ -28,7 +28,7 @@ def apply_warmup_cosine(
     total_epochs: int,
     warmup_epochs: int = 0,
 ) -> list[float]:
-    """Apply the same schedule to all parameter groups, preserving LR ratios."""
+    """对所有参数组应用相同的调度，保持学习率比例不变。"""
 
     factor = warmup_cosine_factor(epoch, total_epochs, warmup_epochs)
     learning_rates: list[float] = []

@@ -39,8 +39,8 @@ inference:
   tile_size: 640
   tile_stride: 512
 
-# Override this path for a local dataset.  The checked-in datasets use the same
-# images/{train,val,test}, points/{split}, labels/{split} convention.
+# 为本地数据集覆盖此路径。仓库内自带的公开数据集采用相同的
+# images/{train,val,test}、points/{split}、labels/{split} 目录约定。
 data:
   root: datasets/ucf_qnrf
   train_split: train

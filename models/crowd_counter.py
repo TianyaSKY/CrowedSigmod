@@ -1,4 +1,4 @@
-"""End-to-end YOLO-PGMD crowd counter."""
+"""端到端 YOLO-PGMD 人群计数器。"""
 
 from __future__ import annotations
 
@@ -16,11 +16,10 @@ from .yolo_encoder import YOLOBackbone
 
 
 class CrowdCounter(nn.Module):
-    """Predict probability, attention, density and count from a fixed crop.
+    """从固定裁剪区域预测概率、注意力、密度与人数。
 
-    The public forward contract is intentionally identical for training and
-    inference.  Count is always the sum of the non-negative density map; there
-    is no fully connected count regressor.
+    公共 forward 契约在训练与推理阶段刻意保持一致。人数始终等于
+    非负密度图之和；不存在全连接的人数回归器。
     """
 
     def __init__(
@@ -89,6 +88,6 @@ class CrowdCounter(nn.Module):
         }
 
     def inference_count(self, images: torch.Tensor) -> torch.Tensor:
-        """Convenience wrapper that preserves the same forward path."""
+        """保持相同前向路径的便捷封装。"""
 
         return self(images)["count"]

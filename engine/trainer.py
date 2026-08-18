@@ -1,4 +1,4 @@
-"""Minimal training loop built around the shared model/loss interfaces."""
+"""围绕共享的模型/损失接口构建的最小训练循环。"""
 
 from __future__ import annotations
 
@@ -78,8 +78,8 @@ class CrowdTrainer:
         history: list[dict[str, float]] = []
         for epoch in range(self.start_epoch, int(epochs)):
             phase = self.freeze_scheduler.apply(self.model, epoch)
-            # Newly enabled backbone parameters need a group. Rebuilding is
-            # explicit and keeps LR multipliers correct at phase boundaries.
+            # 新启用的骨干网络参数需要新的参数组。显式重建可确保
+            # 在阶段切换边界处学习率乘数保持正确。
             if epoch == self.start_epoch or phase.value != getattr(self, "_last_phase", None):
                 self.optimizer = build_optimizer(self.model, base_lr=self.optimizer.defaults["lr"])
             self._last_phase = phase.value

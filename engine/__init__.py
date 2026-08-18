@@ -1,4 +1,4 @@
-"""Training, freezing and validation helpers."""
+"""训练、冻结与验证辅助工具。"""
 
 from .evaluator import counting_metrics, evaluate_tiled
 from .freeze_scheduler import FreezeScheduler, TrainingPhase, build_optimizer

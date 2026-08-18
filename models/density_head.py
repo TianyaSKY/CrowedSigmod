@@ -1,4 +1,4 @@
-"""Stride-four non-negative density head."""
+"""步长 4 的非负密度头。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""P2/P3/P4 projection and stride-4 fusion."""
+"""P2/P3/P4 投影与步长 4 融合。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .yolo_encoder import ConvBNAct, ResidualC2f
 
 
 class MultiScaleFusion(nn.Module):
-    """Project all YOLO scales to a common grid and fuse them at P2 resolution."""
+    """将所有 YOLO 尺度投影到统一网格，并在 P2 分辨率下进行融合。"""
 
     def __init__(
         self,

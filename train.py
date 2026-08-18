@@ -1,6 +1,6 @@
-"""Train YOLO-PGMD from a YAML configuration.
+"""根据 YAML 配置训练 YOLO-PGMD。
 
-Example: ``python train.py --config configs/crowd.yaml --device cuda``.
+示例：``python train.py --config configs/crowd.yaml --device cuda``。
 """
 
 from __future__ import annotations

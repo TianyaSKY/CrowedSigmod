@@ -1,4 +1,4 @@
-"""Evaluate a checkpoint on deterministic full-image tiles."""
+"""在确定性的整图分块上评估检查点。"""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ def main() -> None:
         dynamic_crop=False,
         augment=False,
     )
-    # Deterministic full-image validation: fixed tiling + density stitching,
-    # identical for every evaluation run.
+    # 确定性的整图验证：固定分块 + 密度拼接，
+    # 每次评估运行的结果完全一致。
     def _samples() -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         for index in range(len(dataset)):
             item = dataset.full_image(index)

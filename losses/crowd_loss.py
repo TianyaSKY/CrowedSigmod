@@ -1,4 +1,4 @@
-"""Probability, density and count-consistency losses for YOLO-PGMD."""
+"""用于 YOLO-PGMD 的概率、密度与人数一致性损失。"""
 
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ class LossWeights:
 
 
 class CrowdLoss(nn.Module):
-    """Compute the weighted four-term objective.
+    """计算加权四项目标损失。
 
-    ``forward`` returns a scalar tensor, matching normal PyTorch criteria.
-    ``compute`` additionally exposes named live tensors for logging.
+    ``forward`` 返回标量张量，与常规 PyTorch 准则一致。
+    ``compute`` 额外暴露命名实时张量，便于日志记录。
     """
 
     def __init__(
@@ -111,7 +111,7 @@ class CrowdLoss(nn.Module):
 
 
 def global_count_loss(predicted_density: torch.Tensor, count_gt: torch.Tensor) -> torch.Tensor:
-    """Standalone normalized global count loss for experiments."""
+    """用于实验的独立归一化全局人数损失。"""
 
     predicted_count = predicted_density.flatten(1).sum(dim=1)
     count_gt = count_gt.to(device=predicted_density.device, dtype=predicted_density.dtype).reshape(-1)

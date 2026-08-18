@@ -1,4 +1,4 @@
-"""Lightweight crowd probability head."""
+"""轻量级人群概率头。"""
 
 from __future__ import annotations
 
