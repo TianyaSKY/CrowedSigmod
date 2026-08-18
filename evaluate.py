@@ -31,8 +31,10 @@ def main() -> None:
         msr_blocks=int(model_cfg.get("msr_blocks", 3)),
         msr_dilations=tuple(model_cfg.get("dilations", [1, 2, 3])),
     ).to(args.device)
+    # weights_only=False 兼容旧版 torch.save 保存的完整 checkpoint 结构。
     checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
     model.load_state_dict(checkpoint["model"])
+    # 关闭动态裁剪与增强，保证同一检查点每次评估得到完全相同的结果。
     dataset = CrowdDataset(
         config["data"]["root"],
         config["data"].get("val_split", "val"),
@@ -41,8 +43,9 @@ def main() -> None:
         dynamic_crop=False,
         augment=False,
     )
-    # 确定性的整图验证：固定分块 + 密度拼接，
-    # 每次评估运行的结果完全一致。
+    # 训练时模型只见过固定尺寸裁剪，任意分辨率的整图必须切瓦片推理；
+    # 固定分块 + 密度拼接后求和即得整图人数，且每次评估结果完全一致。
+    # 这也与训练分布保持一致，避免直接缩放整图带来的计数偏差。
     def _samples() -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         for index in range(len(dataset)):
             item = dataset.full_image(index)

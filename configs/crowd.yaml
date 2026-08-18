@@ -1,42 +1,63 @@
+# 输入图像统一边长（正方形）与标签下采样倍数；
+# 标签网格尺寸 = image_size / output_stride，二者必须整除。
 image_size: 640
 output_stride: 4
 
 model:
+  # YOLO 主干配置文件，可整体替换以换用不同规模的主干。
   backbone: yolo11n.yaml
+  # null = 随机初始化，不加载预训练权重；否则为权重文件路径。
   pretrained: null
   use_ultralytics: true
+  # P2/P3/P4 投影融合后的特征通道数，PGMD 各分支共用。
   fusion_channels: 128
+  # 各尺度特征投影到统一通道数时使用的 1x1 卷积宽度。
   projection_channels: 64
+  # MSR 精化块的数量。
   msr_blocks: 3
+  # 每个 MSR 块内并行膨胀分支的膨胀率，用于扩大感受野。
   dilations: [1, 2, 3]
+  # 注意力门控缩放参数的初始值；0 表示从恒等映射起步。
   attention_alpha_init: 0.0
 
 targets:
+  # 概率图（头部似然图）的高斯 σ，以输出网格单元计。
   probability_sigma: 2.0
+  # 密度图的高斯 σ。
   density_sigma: 2.0
+  # 是否按点间 k 近邻间距自适应 σ（密集人群更友好）。
   adaptive_density: false
 
 loss:
   probability: 1.0
   density: 1.0
   count: 0.5
+  # 局部区域损失：把密度图切分成 local_grid x local_grid 块分别约束。
   local: 0.25
   local_grid: 4
+  # dice 项与 BCE 叠加用于概率图：以区域重叠度补充逐像素交叉熵。
   dice: 0.2
 
 training:
   epochs: 100
+  # 前 freeze_epochs 个 epoch 冻结主干，仅训练检测头。
   freeze_epochs: 10
+  # 阶段切换点：epoch 达到 partial_unfreeze_epoch 进入部分解冻，
+  # 达到 full_unfreeze_epoch 完全解冻。
   partial_unfreeze_epoch: 10
   full_unfreeze_epoch: 30
   batch_size: 2
   workers: 4
   learning_rate: 0.001
   weight_decay: 0.0001
+  # 学习率预热轮数：线性升至峰值后再按余弦衰减。
   warmup_epochs: 3
 
 inference:
+  # 推理瓦片边长（须能被 output_stride 整除）。
   tile_size: 640
+  # 相邻瓦片的起点步长；小于 tile_size 时形成重叠带，
+  # 重叠区域按权重融合以抑制边界伪影。
   tile_stride: 512
 
 # 为本地数据集覆盖此路径。仓库内自带的公开数据集采用相同的

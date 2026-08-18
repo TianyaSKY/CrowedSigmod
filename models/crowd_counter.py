@@ -18,8 +18,9 @@ from .yolo_encoder import YOLOBackbone
 class CrowdCounter(nn.Module):
     """从固定裁剪区域预测概率、注意力、密度与人数。
 
-    公共 forward 契约在训练与推理阶段刻意保持一致。人数始终等于
-    非负密度图之和；不存在全连接的人数回归器。
+    公共 forward 契约在训练与推理阶段刻意保持一致：同一份代码、同一份
+    计算图，无需切换 train/eval 分支。人数始终等于非负密度图之和；
+    不存在全连接的人数回归器，计数能力完全来自逐像素回归。
     """
 
     def __init__(
@@ -37,6 +38,7 @@ class CrowdCounter(nn.Module):
         use_msr: bool = True,
     ) -> None:
         super().__init__()
+        # 整条流水线的工作分辨率：密度图相对原图下采样 4 倍（P2 网格）
         self.output_stride = 4
         self.backbone = YOLOBackbone(
             model_name=backbone_name,
@@ -57,6 +59,8 @@ class CrowdCounter(nn.Module):
         self.use_msr = bool(use_msr)
 
     def forward(self, images: torch.Tensor) -> dict[str, torch.Tensor]:
+        # 输入契约 [B, 3, H, W]：在入口处校验，避免形状错误在深层网络中
+        # 以难读的维度不匹配错误形式暴露
         if images.ndim != 4 or images.shape[1] != 3:
             raise ValueError(f"images must have shape [B, 3, H, W], got {tuple(images.shape)}")
         p2, p3, p4 = self.backbone(images)
@@ -64,6 +68,8 @@ class CrowdCounter(nn.Module):
         if self.use_probability:
             probability = self.probability_head(features)
         else:
+            # 消融开关：零图占位保持后续注意力分支的输入契约不变，
+            # 全零概率使空间注意力退化为纯特征统计（均值/最大值）
             probability = torch.zeros(
                 (features.shape[0], 1, features.shape[2], features.shape[3]),
                 dtype=features.dtype,
@@ -72,13 +78,18 @@ class CrowdCounter(nn.Module):
         if self.use_attention:
             attended, attention = self.attention(features, probability)
         else:
+            # 关闭注意力时直接透传特征，并用全 1 图占位，
+            # 保持输出字典的键与形状在所有消融配置下一致
             attended = features
             attention = torch.ones_like(probability)
         if self.use_msr:
             refined = self.refinement(attended)
         else:
+            # 关闭 MSR 时跳过细化，验证多尺度残差模块的独立贡献
             refined = attended
         density = self.density_head(refined)
+        # 人数 = 密度图全部像素求和：密度由 Softplus 保证非负，
+        # 求和结果稳定且保留小数精度；无 FC 回归头（见类 docstring）
         count = density.flatten(1).sum(dim=1)
         return {
             "probability": probability,
@@ -90,4 +101,5 @@ class CrowdCounter(nn.Module):
     def inference_count(self, images: torch.Tensor) -> torch.Tensor:
         """保持相同前向路径的便捷封装。"""
 
+        # 与训练共用 self.forward，保证推理人数与训练时学到的统计一致
         return self(images)["count"]

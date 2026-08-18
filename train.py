@@ -29,6 +29,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # 入口约定：命令行只覆盖少量运行参数（config/device/epochs/output），
+    # 模型、损失与训练超参全部从 YAML 读取，保证实验配置可复现。
     args = parse_args()
     config = yaml.safe_load(args.config.read_text())
     data_cfg = config["data"]
@@ -51,6 +53,7 @@ def main() -> None:
         shuffle=True,
         num_workers=int(train_cfg.get("workers", 0)),
         collate_fn=crowd_collate,
+        # GPU 训练时启用 pin_memory，加速主机到设备的批量拷贝。
         pin_memory=args.device.startswith("cuda"),
     )
     model = CrowdCounter(
@@ -70,6 +73,8 @@ def main() -> None:
         local_grid=int(config["loss"].get("local_grid", 4)),
         dice_weight=float(config["loss"].get("dice", 0.2)),
     )
+    # 分阶段解冻：先冻结主干稳定早期训练，再逐步解冻以微调全网络，
+    # 避免随机初始化阶段主干梯度不稳定。
     freeze = FreezeScheduler(
         freeze_epochs=int(train_cfg["freeze_epochs"]),
         partial_unfreeze_epoch=int(train_cfg["partial_unfreeze_epoch"]),
@@ -88,6 +93,7 @@ def main() -> None:
         loader,
         epochs=epochs,
         checkpoint_dir=args.output,
+        # warmup 取 min(warmup_epochs, epochs)，防止命令行缩短训练轮数后预热越界。
         warmup_epochs=min(int(train_cfg.get("warmup_epochs", 0)), epochs),
     )
 

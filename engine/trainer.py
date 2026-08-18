@@ -39,6 +39,8 @@ class CrowdTrainer:
 
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         moved = dict(batch)
+        # non_blocking=True 在 CUDA 上发起异步拷贝，可与后续前向计算
+        # 重叠；键可能缺失（训练与验证的标注组合不同），缺失时跳过即可。
         for key in ("image", "probability_gt", "density_gt", "count_gt"):
             if key in moved:
                 moved[key] = moved[key].to(self.device, non_blocking=True)
@@ -46,11 +48,16 @@ class CrowdTrainer:
 
     def train_epoch(self, loader: DataLoader) -> dict[str, float]:
         self.model.train()
+        # model.train() 会递归把含冻结骨干在内的所有模块切回训练模式，
+        # 因此必须紧接着把骨干 BN 重新压回 eval——顺序不能颠倒，否则
+        # 冻结阶段的运行统计会在当前 epoch 被小 batch 更新。
         self.freeze_scheduler.enforce_batch_norm_state(self.model)
         running: dict[str, float] = {}
         steps = 0
         for batch in loader:
             batch = self._move_batch(batch)
+            # set_to_none=True 把梯度置为 None 而非零张量：省去逐元素
+            # 清零的写操作，释放旧梯度内存，反向传播时会按需重新分配。
             self.optimizer.zero_grad(set_to_none=True)
             outputs = self.model(batch["image"])
             details = self.criterion.compute(outputs, batch)  # type: ignore[attr-defined]
@@ -59,6 +66,8 @@ class CrowdTrainer:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
             self.optimizer.step()
             for key, value in details.items():
+                # 只累计标量且有限的项（跳过 NaN/Inf 与向量项），
+                # 最后按步数取平均，得到每 epoch 的损失/指标汇总。
                 if value.ndim == 0 and torch.isfinite(value):
                     running[key] = running.get(key, 0.0) + float(value.detach())
             steps += 1
@@ -86,6 +95,8 @@ class CrowdTrainer:
             if scheduler is not None:
                 scheduler.step()
             else:
+                # 未传入外部 scheduler 时使用内置 warmup+cosine；
+                # 二选一执行，避免对学习率做双重缩放。
                 apply_warmup_cosine(self.optimizer, epoch=epoch, total_epochs=epochs, warmup_epochs=warmup_epochs)
             metrics = self.train_epoch(loader)
             metrics["epoch"] = float(epoch)
@@ -97,6 +108,8 @@ class CrowdTrainer:
     def save_checkpoint(self, path: str | Path, epoch: int, metrics: dict[str, float] | None = None) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # 快照内容：模型权重、优化器状态（Adam 的动量/方差，续训必需）、
+        # 冻结调度器状态（恢复后阶段与解冻边界一致）、当前 epoch 与指标。
         torch.save(
             {
                 "epoch": int(epoch),
@@ -112,6 +125,8 @@ class CrowdTrainer:
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model"], strict=strict)
         if "optimizer" in checkpoint:
+            # 恢复优化器状态以无缝续训；旧版 checkpoint 可能没有该键，判空兼容。
             self.optimizer.load_state_dict(checkpoint["optimizer"])
+        # 从断点后的下一个 epoch 继续训练，配合 fit 的 range(start_epoch, epochs)。
         self.start_epoch = int(checkpoint.get("epoch", -1)) + 1
         return checkpoint

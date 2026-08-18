@@ -15,6 +15,7 @@ from models.crowd_counter import CrowdCounter
 def image_tensor(path: Path) -> torch.Tensor:
     with Image.open(path) as image:
         rgb = image.convert("RGB")
+        # frombuffer 零拷贝复用像素缓冲区，避免额外数据拷贝。
         raw = torch.frombuffer(bytearray(rgb.tobytes()), dtype=torch.uint8)
         return raw.reshape(rgb.height, rgb.width, 3).permute(2, 0, 1).float().div_(255.0)
 
@@ -28,6 +29,8 @@ def main() -> None:
     parser.add_argument("--tile-stride", type=int, default=512)
     parser.add_argument("--output-stride", type=int, default=4)
     args = parser.parse_args()
+    # 推理入口：模型按默认结构构造（不加载预训练权重），
+    # 权重完全来自 --checkpoint；瓦片参数直接由命令行覆盖。
     model = CrowdCounter().to(args.device)
     checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
     model.load_state_dict(checkpoint["model"])
