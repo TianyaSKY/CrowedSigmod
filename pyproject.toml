@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yolo-pgmd-crowd-counter"
+version = "0.1.0"
+description = "YOLO-PGMD density-map crowd counter"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.0",
+  "Pillow>=9.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+yolo = ["ultralytics>=8.0"]
+
+[tool.setuptools]
+packages = ["data", "models", "losses", "engine", "inference"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

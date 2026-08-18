@@ -1,0 +1,23 @@
+# 原始与整理后数据集（本地大文件，不入库；git clone 后从 data/ 重新构建）
+data/
+datasets/
+
+# 训练/推理产物
+runs/
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

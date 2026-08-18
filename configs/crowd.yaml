@@ -1,0 +1,47 @@
+image_size: 640
+output_stride: 4
+
+model:
+  backbone: yolo11n.yaml
+  pretrained: null
+  use_ultralytics: true
+  fusion_channels: 128
+  projection_channels: 64
+  msr_blocks: 3
+  dilations: [1, 2, 3]
+  attention_alpha_init: 0.0
+
+targets:
+  probability_sigma: 2.0
+  density_sigma: 2.0
+  adaptive_density: false
+
+loss:
+  probability: 1.0
+  density: 1.0
+  count: 0.5
+  local: 0.25
+  local_grid: 4
+  dice: 0.2
+
+training:
+  epochs: 100
+  freeze_epochs: 10
+  partial_unfreeze_epoch: 10
+  full_unfreeze_epoch: 30
+  batch_size: 2
+  workers: 4
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  warmup_epochs: 3
+
+inference:
+  tile_size: 640
+  tile_stride: 512
+
+# Override this path for a local dataset.  The checked-in datasets use the same
+# images/{train,val,test}, points/{split}, labels/{split} convention.
+data:
+  root: datasets/ucf_qnrf
+  train_split: train
+  val_split: val

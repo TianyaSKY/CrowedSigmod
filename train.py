@@ -1,0 +1,96 @@
+"""Train YOLO-PGMD from a YAML configuration.
+
+Example: ``python train.py --config configs/crowd.yaml --device cuda``.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import torch
+import yaml
+from torch.utils.data import DataLoader
+
+from data.crowd_dataset import CrowdDataset, crowd_collate
+from engine.freeze_scheduler import FreezeScheduler
+from engine.trainer import CrowdTrainer
+from losses.crowd_loss import CrowdLoss
+from models.crowd_counter import CrowdCounter
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=Path("configs/crowd.yaml"))
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--output", type=Path, default=Path("runs/crowd"))
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    config = yaml.safe_load(args.config.read_text())
+    data_cfg = config["data"]
+    model_cfg = config["model"]
+    target_cfg = config["targets"]
+    train_cfg = config["training"]
+    root = Path(data_cfg["root"])
+    dataset = CrowdDataset(
+        root,
+        data_cfg.get("train_split", "train"),
+        crop_size=int(config["image_size"]),
+        output_stride=int(config["output_stride"]),
+        probability_sigma=float(target_cfg["probability_sigma"]),
+        density_sigma=float(target_cfg["density_sigma"]),
+        adaptive_density=bool(target_cfg.get("adaptive_density", False)),
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=int(train_cfg["batch_size"]),
+        shuffle=True,
+        num_workers=int(train_cfg.get("workers", 0)),
+        collate_fn=crowd_collate,
+        pin_memory=args.device.startswith("cuda"),
+    )
+    model = CrowdCounter(
+        backbone_name=model_cfg.get("backbone", "yolo11n.yaml"),
+        pretrained=model_cfg.get("pretrained"),
+        use_ultralytics=bool(model_cfg.get("use_ultralytics", True)),
+        fusion_channels=int(model_cfg.get("fusion_channels", 128)),
+        projection_channels=int(model_cfg.get("projection_channels", 64)),
+        msr_blocks=int(model_cfg.get("msr_blocks", 3)),
+        msr_dilations=tuple(model_cfg.get("dilations", [1, 2, 3])),
+    )
+    criterion = CrowdLoss(
+        probability_weight=float(config["loss"]["probability"]),
+        density_weight=float(config["loss"]["density"]),
+        count_weight=float(config["loss"]["count"]),
+        local_weight=float(config["loss"]["local"]),
+        local_grid=int(config["loss"].get("local_grid", 4)),
+        dice_weight=float(config["loss"].get("dice", 0.2)),
+    )
+    freeze = FreezeScheduler(
+        freeze_epochs=int(train_cfg["freeze_epochs"]),
+        partial_unfreeze_epoch=int(train_cfg["partial_unfreeze_epoch"]),
+        full_unfreeze_epoch=int(train_cfg["full_unfreeze_epoch"]),
+    )
+    trainer = CrowdTrainer(
+        model,
+        criterion,
+        device=args.device,
+        base_lr=float(train_cfg["learning_rate"]),
+        weight_decay=float(train_cfg["weight_decay"]),
+        freeze_scheduler=freeze,
+    )
+    epochs = int(args.epochs if args.epochs is not None else train_cfg["epochs"])
+    trainer.fit(
+        loader,
+        epochs=epochs,
+        checkpoint_dir=args.output,
+        warmup_epochs=min(int(train_cfg.get("warmup_epochs", 0)), epochs),
+    )
+
+
+if __name__ == "__main__":
+    main()
