@@ -287,6 +287,30 @@ class CrowdTrainer:
                     for key, val in val_metrics.items():
                         writer.add_scalar(f"val/{key}", val, epoch + 1)
                     writer.add_scalar("val/best_mae", self.best_metric, epoch + 1)
+
+                    # 3. 定期向 TensorBoard 记录可视化抽样图像
+                    try:
+                        from utils.visualization import create_composite_figure, figure_to_tensor, save_figure
+                        if val_dataset is not None and len(val_dataset) > 0:
+                            sample_item = val_dataset.full_image(0)
+                            sample_img = sample_item["image"]
+                            sample_gt = float(sample_item["count_gt"].item())
+                            active_tiler = tiler or DensityTiler()
+                            sample_res = active_tiler(self.model, sample_img, device=self.device)
+                            fig = create_composite_figure(
+                                sample_img,
+                                sample_res.density,
+                                pred_count=float(sample_res.count.item()),
+                                gt_count=sample_gt,
+                                title=f"Epoch {epoch + 1} Val Sample | GT: {sample_gt:.1f} | Pred: {float(sample_res.count.item()):.1f}",
+                            )
+                            vis_tensor = figure_to_tensor(fig)
+                            writer.add_image("val/visual_predictions", vis_tensor, epoch + 1)
+                            import matplotlib.pyplot as plt
+                            plt.close(fig)
+                    except Exception as e:
+                        logger.warning(f"Failed to log visual sample to TensorBoard: {e}")
+
                 writer.flush()
 
             # 记录历史

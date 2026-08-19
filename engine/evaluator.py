@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 import torch
 from tqdm import tqdm
@@ -29,20 +29,20 @@ def counting_metrics(predicted: torch.Tensor, target: torch.Tensor) -> dict[str,
 
 def evaluate_tiled(
     model: torch.nn.Module,
-    samples: Iterable[tuple[torch.Tensor, torch.Tensor]],
+    samples: Iterable[tuple[torch.Tensor, torch.Tensor] | dict[str, Any]],
     *,
     tiler: DensityTiler | None = None,
     device: str | torch.device | None = None,
     total_samples: int | None = None,
     show_pbar: bool = True,
-) -> dict[str, float]:
-    """评估确定性的整图；每个样本为 ``(image, count_gt)``。"""
+    return_details: bool = False,
+) -> dict[str, float] | tuple[dict[str, float], list[dict[str, Any]]]:
+    """评估确定性的整图；每个样本为 ``(image, count_gt)`` 或 dict 结构。"""
 
     tiler = tiler or DensityTiler()
-    # 在整图上推理（非随机裁剪/滑动平均），结果确定可复现；每个样本的
-    # 真值是整图人数标量，reshape(1) 保持列向量以便 concat 后统一计算。
     predictions: list[torch.Tensor] = []
     targets: list[torch.Tensor] = []
+    detailed_records: list[dict[str, Any]] = []
 
     iterator = (
         tqdm(samples, total=total_samples, desc="Evaluating", dynamic_ncols=True, leave=False)
@@ -50,8 +50,36 @@ def evaluate_tiled(
         else samples
     )
 
-    for image, count_gt in iterator:
+    for item in iterator:
+        if isinstance(item, dict):
+            image = item["image"]
+            count_gt = item["count_gt"]
+            image_id = item.get("image_id", "")
+        else:
+            image, count_gt = item[0], item[1]
+            image_id = ""
+
         result = tiler(model, image, device=device)
-        predictions.append(result.count.cpu())
-        targets.append(torch.as_tensor(count_gt).reshape(1).cpu())
-    return counting_metrics(torch.cat(predictions), torch.cat(targets))
+        pred_cnt = result.count.cpu()
+        tgt_cnt = torch.as_tensor(count_gt).reshape(1).cpu()
+
+        predictions.append(pred_cnt)
+        targets.append(tgt_cnt)
+
+        if return_details:
+            detailed_records.append(
+                {
+                    "image": image.cpu(),
+                    "pred_count": float(pred_cnt.item()),
+                    "target_count": float(tgt_cnt.item()),
+                    "error": float((pred_cnt - tgt_cnt).item()),
+                    "density": result.density.cpu(),
+                    "image_id": image_id,
+                }
+            )
+
+    metrics = counting_metrics(torch.cat(predictions), torch.cat(targets))
+    if return_details:
+        return metrics, detailed_records
+    return metrics
+
