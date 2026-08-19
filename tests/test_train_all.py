@@ -100,3 +100,18 @@ def test_generate_benchmark_summary() -> None:
         assert "dataset_a" in md_text
         assert "dataset_b" in md_text
         assert "AVERAGE" in md_text
+
+
+def test_train_all_and_train_output_default_none() -> None:
+    """验证 train_all.py 与 train.py 的 --output 参数默认值为 None（由运行时时间戳自动生成）。"""
+    from train import parse_args as parse_train_args
+    from train_all import parse_args as parse_train_all_args
+
+    with patch("sys.argv", ["train.py"]):
+        args_train = parse_train_args()
+        assert args_train.output is None
+
+    with patch("sys.argv", ["train_all.py"]):
+        args_train_all = parse_train_all_args()
+        assert args_train_all.output is None
+

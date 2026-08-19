@@ -105,6 +105,12 @@ def test_density_loss_normalized_scale() -> None:
     details = criterion.compute(outputs, targets)
     density_loss = float(details["density"].item())
 
-    # 100 个人头时，全零预测的整图绝对空间误差之和为 100，除以 (100+1) 约等于 0.99
+    # 100 个人头时，全零预测在 power=1.5, scale=10 下 loss 约 2.74；在 power=1.0, scale=1.0 下约 0.99
     # 绝不能塌缩为旧 SmoothL1 的 100 / 25600 ≈ 0.0039
-    assert 0.5 < density_loss <= 1.0, f"Expected normalized density loss ~0.99, got {density_loss}"
+    assert 0.5 < density_loss <= 5.0, f"Expected normalized density loss in (0.5, 5.0), got {density_loss}"
+
+    # 同时校验 L1 baseline
+    criterion_l1 = CrowdLoss(density_power=1.0, density_scale=1.0)
+    details_l1 = criterion_l1.compute(outputs, targets)
+    density_loss_l1 = float(details_l1["density"].item())
+    assert 0.5 < density_loss_l1 <= 1.0, f"Expected L1 normalized density loss ~0.99, got {density_loss_l1}"

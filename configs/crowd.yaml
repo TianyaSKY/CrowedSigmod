@@ -31,6 +31,12 @@ targets:
 loss:
   probability: 1.0
   density: 1.0
+
+  # Density power loss:
+  # scale * |pred - gt| ^ power
+  density_power: 1.5
+  density_scale: 10.0
+
   count: 0.5
   # 局部区域损失：把密度图切分成 local_grid x local_grid 块分别约束。
   local: 0.25

@@ -129,7 +129,7 @@ datasets/<name>/
 
 ```bash
 python train.py --config configs/crowd.yaml --device cuda
-python train.py --config configs/crowd.yaml --epochs 10 --output runs/exp1   # 覆盖轮数/输出目录
+python train.py --config configs/crowd.yaml --epochs 10   # 覆盖轮数（自动按时间戳保存至 runs/train_<timestamp>）
 ```
 
 训练策略：
@@ -145,9 +145,9 @@ python train.py --config configs/crowd.yaml --epochs 10 --output runs/exp1   # �
 ## 评估
 
 ```bash
-python evaluate.py --config configs/crowd.yaml --checkpoint runs/crowd/best.pt --device cuda
+python evaluate.py --config configs/crowd.yaml --checkpoint runs/train_20260819_140000/best.pt --device cuda
 # 可选生成回归散点图与定性样本对比：
-python evaluate.py --checkpoint runs/crowd/best.pt --visualize-dir runs/eval_vis --num-vis 10
+python evaluate.py --checkpoint runs/train_20260819_140000/best.pt --visualize-dir runs/eval_vis --num-vis 10
 ```
 
 验证不做随机裁剪：整图固定 tiling → 每块推理 → 密度拼接 → 整图求和，保证每次评估完全一致。输出 MAE / RMSE / NAE，并自动保存真实人数 vs 预测人数的回归散点图 `gt_vs_pred_scatter.png`。
@@ -158,7 +158,7 @@ python evaluate.py --checkpoint runs/crowd/best.pt --visualize-dir runs/eval_vis
 
 ```bash
 # 1. 顺序基准模式（默认）：对所有数据集依次训练并在测试集评估，生成跨数据集对比总表与柱状图
-python train_all.py --device cuda --output runs/all_datasets
+python train_all.py --device cuda
 
 # 2. 针对指定数据集子集快速训练（覆盖轮数与批大小）
 python train_all.py --datasets ucf_qnrf shanghaitech_AB --epochs 50 --batch-size 4 --device cuda
@@ -167,13 +167,13 @@ python train_all.py --datasets ucf_qnrf shanghaitech_AB --epochs 50 --batch-size
 python train_all.py --datasets ucf_cc50 --ucf-cc50-folds all --epochs 50 --device cuda
 
 # 4. 联合混合训练模式：将所有数据集 train split 拼接联合训练单一通用模型，并在各个测试集上评估泛化能力
-python train_all.py --mode joint --epochs 80 --output runs/joint_exp --device cuda
+python train_all.py --mode joint --epochs 80 --device cuda
 
 # 5. 跨数据集批量验证模式：加载已有检查点直接在所有数据集上做基准测试
-python train_all.py --mode eval_only --checkpoint runs/all_datasets/ucf_qnrf/best.pt
+python train_all.py --mode eval_only --checkpoint runs/joint_20260819_140000/joint_model/best.pt
 ```
 
-评测产物集中输出至 `--output` 指定目录，包含：
+评测产物自动输出至以时间戳命名的独立目录（如 `runs/joint_<timestamp>` 或 `runs/sequential_<timestamp>`），包含：
 - **`summary_report.md`**：Markdown 格式的跨数据集综合 Benchmark 评测报告。
 - **`summary_metrics.json` / `summary_metrics.csv`**：结构化指标大表（含 Macro-Average 平均指标）。
 - **`benchmark_comparison.png`**：MAE / RMSE 跨数据集横向对比高清柱状图。

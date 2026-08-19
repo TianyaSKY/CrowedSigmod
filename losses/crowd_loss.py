@@ -40,11 +40,16 @@ class CrowdLoss(nn.Module):
         local_weight: float = 0.25,
         local_grid: int = 4,
         dice_weight: float = 0.2,
-        smooth_l1_beta: float = 1.0,
+        density_power: float = 1.5,
+        density_scale: float = 10.0,
     ) -> None:
         super().__init__()
         if local_grid <= 0:
             raise ValueError("local_grid must be positive")
+        if not 1.0 <= density_power <= 2.0:
+            raise ValueError("density_power must be in [1.0, 2.0]")
+        if density_scale <= 0:
+            raise ValueError("density_scale must be positive")
         self.weights = LossWeights(
             probability=probability_weight,
             density=density_weight,
@@ -53,9 +58,8 @@ class CrowdLoss(nn.Module):
             local_grid=local_grid,
         )
         self.dice_weight = float(dice_weight)
-        # beta=1.0：像素误差 <1 时用二次项（零附近平滑，梯度不会剧烈抖动），
-        # 误差更大时退化为 L1 —— 密度峰值的离群误差不会被平方放大。
-        self.smooth_l1_beta = float(smooth_l1_beta)
+        self.density_power = float(density_power)
+        self.density_scale = float(density_scale)
 
     @staticmethod
     def _as_count(count: torch.Tensor, batch_size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
@@ -103,9 +107,14 @@ class CrowdLoss(nn.Module):
         dice = 1.0 - ((2.0 * intersection + 1e-6) / (denominator + 1e-6)).mean()
         probability_loss = bce + self.dice_weight * dice
 
-        # 空间密度误差归一化：将整图空间像素绝对误差求和后再按 (count_gt + 1) 进行样本级归一化，
-        # 避免像素级均值导致 loss 长期处于 0.000x 量级、对零预测塌缩缺乏足够梯度惩罚的问题。
-        density_error = (density - density_gt).abs().flatten(1).sum(dim=1)
+        # 空间密度误差归一化（幂函数 + 尺度缩放）：
+        # scale * |pred - gt|^power，按 (count_gt + 1) 进行样本级归一化。
+        # 当 power=1.5 时：大误差梯度强、接近真值时梯度自动衰减放手，防止背景全零压制导致预测塌缩。
+        density_abs_error = (density - density_gt).abs()
+        density_error = (
+            self.density_scale
+            * density_abs_error.pow(self.density_power)
+        ).flatten(1).sum(dim=1)
         density_loss = (density_error / (count_gt + 1.0)).mean()
 
         predicted_count = density.flatten(1).sum(dim=1)

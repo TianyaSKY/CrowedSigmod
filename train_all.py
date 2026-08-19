@@ -28,6 +28,7 @@ import sys
 import time
 import traceback
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
@@ -257,7 +258,12 @@ def create_model_and_trainer(
         local_weight=float(config["loss"]["local"]),
         local_grid=int(config["loss"].get("local_grid", 4)),
         dice_weight=float(config["loss"].get("dice", 0.2)),
+        density_power=float(config["loss"].get("density_power", 1.5)),
+        density_scale=float(config["loss"].get("density_scale", 10.0)),
     )
+    logger.info("Density Loss: scale * |pred-gt|^power")
+    logger.info(f"Density Power: {criterion.density_power:.3f}")
+    logger.info(f"Density Scale: {criterion.density_scale:.3f}")
 
     freeze = FreezeScheduler(
         freeze_epochs=int(train_cfg["freeze_epochs"]),
@@ -976,7 +982,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=None, help="Override epochs for training")
     parser.add_argument("--batch-size", type=int, default=None, help="Override batch size")
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate")
-    parser.add_argument("--output", type=Path, default=Path("runs/all_datasets"), help="Root directory for multi-dataset outputs")
+    parser.add_argument("--output", type=Path, default=None, help="Root directory for multi-dataset outputs (defaults to runs/<mode>_<timestamp>)")
     parser.add_argument("--val-interval", type=int, default=None, help="Validation interval epochs")
     parser.add_argument("--test-after-train", action="store_true", default=True, help="Run test evaluation on best checkpoint after training")
     parser.add_argument("--no-test-after-train", dest="test_after_train", action="store_false", help="Skip post-training test set evaluation")
@@ -992,7 +998,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    output_dir = Path(args.output)
+    if args.output is not None:
+        output_dir = Path(args.output)
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path("runs") / f"{args.mode}_{timestamp}"
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_file = output_dir / "train_all.log"

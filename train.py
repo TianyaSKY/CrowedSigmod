@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -28,7 +29,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/crowd.yaml"))
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--output", type=Path, default=Path("runs/crowd"))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Directory to save training outputs (defaults to runs/train_<timestamp>)",
+    )
     return parser.parse_args()
 
 
@@ -54,7 +60,12 @@ def main() -> None:
     # 入口约定：命令行只覆盖少量运行参数（config/device/epochs/output），
     # 模型、损失与训练超参全部从 YAML 读取，保证实验配置可复现。
     args = parse_args()
-    output_dir = Path(args.output)
+    if args.output is not None:
+        output_dir = Path(args.output)
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path("runs") / f"train_{timestamp}"
+
     setup_logger(output_dir)
 
     logger.info(f"Loading config from {args.config}")
@@ -108,7 +119,12 @@ def main() -> None:
         local_weight=float(config["loss"]["local"]),
         local_grid=int(config["loss"].get("local_grid", 4)),
         dice_weight=float(config["loss"].get("dice", 0.2)),
+        density_power=float(config["loss"].get("density_power", 1.5)),
+        density_scale=float(config["loss"].get("density_scale", 10.0)),
     )
+    logger.info("Density Loss: scale * |pred-gt|^power")
+    logger.info(f"Density Power: {criterion.density_power:.3f}")
+    logger.info(f"Density Scale: {criterion.density_scale:.3f}")
     # 分阶段解冻：先冻结主干稳定早期训练，再逐步解冻以微调全网络，
     # 避免随机初始化阶段主干梯度不稳定。
     freeze = FreezeScheduler(
