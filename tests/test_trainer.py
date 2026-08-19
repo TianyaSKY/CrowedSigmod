@@ -54,4 +54,5 @@ def test_trainer_fit_with_tensorboard_and_tqdm() -> None:
         assert len(history) == 2
         assert (ckpt_dir / "epoch_000.pt").exists()
         assert (ckpt_dir / "epoch_001.pt").exists()
+        assert (ckpt_dir / "metrics.json").exists()
         assert any(tb_dir.glob("events.out.tfevents.*"))

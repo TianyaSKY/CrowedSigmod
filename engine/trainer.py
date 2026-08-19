@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -155,9 +156,12 @@ class CrowdTrainer:
                 writer.flush()
 
             if checkpoint_dir is not None:
-                ckpt_path = Path(checkpoint_dir) / f"epoch_{epoch:03d}.pt"
+                ckpt_dir = Path(checkpoint_dir)
+                ckpt_path = ckpt_dir / f"epoch_{epoch:03d}.pt"
                 self.save_checkpoint(ckpt_path, epoch, metrics)
                 logger.info(f"Saved checkpoint -> {ckpt_path}")
+                metrics_json = ckpt_dir / "metrics.json"
+                metrics_json.write_text(json.dumps(history, indent=2, ensure_ascii=False))
         return history
 
     def save_checkpoint(self, path: str | Path, epoch: int, metrics: dict[str, float] | None = None) -> None:

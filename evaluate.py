@@ -1,8 +1,6 @@
-"""在确定性的整图分块上评估检查点。"""
-
-from __future__ import annotations
-
 import argparse
+import json
+import sys
 from pathlib import Path
 from typing import Iterator
 
@@ -21,7 +19,27 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/crowd.yaml"))
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--output", type=Path, default=None, help="Directory to save eval logs and metrics")
     args = parser.parse_args()
+
+    out_dir = args.output or args.checkpoint.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    eval_log_file = out_dir / "eval.log"
+
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
+        level="INFO",
+    )
+    logger.add(
+        str(eval_log_file),
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        level="INFO",
+        rotation="10 MB",
+        encoding="utf-8",
+    )
+
     config = yaml.safe_load(args.config.read_text())
     model_cfg = config["model"]
     model = CrowdCounter(
@@ -69,6 +87,10 @@ def main() -> None:
     )
     metric_str = " | ".join(f"{k.upper()}: {v:.4f}" for k, v in metrics.items())
     logger.success(f"Evaluation finished -> {metric_str}")
+
+    metrics_out = out_dir / "eval_metrics.json"
+    metrics_out.write_text(json.dumps(metrics, indent=2, ensure_ascii=False))
+    logger.info(f"Saved evaluation metrics to {metrics_out}")
     print(metrics)
 
 
