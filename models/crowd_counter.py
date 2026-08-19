@@ -54,6 +54,9 @@ class CrowdCounter(nn.Module):
         self.attention = ProbabilityGuidedAttention(fusion_channels)
         self.refinement = MSRRefinement(fusion_channels, blocks=msr_blocks, dilations=msr_dilations)
         self.density_head = DensityHead(fusion_channels)
+        # 可学习长残差缩放系数：从 0 初始化，初始阶段严格等价于原结构，
+        # 网络自适应学习需要直接透传多少 YOLO 融合特征给密度头，防止深层精化过程中的特征塌缩。
+        self.density_residual_alpha = nn.Parameter(torch.zeros(1))
         self.use_probability = bool(use_probability)
         self.use_attention = bool(use_attention)
         self.use_msr = bool(use_msr)
@@ -87,6 +90,10 @@ class CrowdCounter(nn.Module):
         else:
             # 关闭 MSR 时跳过细化，验证多尺度残差模块的独立贡献
             refined = attended
+
+        # 长残差跳跃连接：融合特征直接跨越注意力与 MSR 精化块，向密度头补充底层空间细节
+        refined = refined + self.density_residual_alpha * features
+
         density = self.density_head(refined)
         # 人数 = 密度图全部像素求和：密度由 Softplus 保证非负，
         # 求和结果稳定且保留小数精度；无 FC 回归头（见类 docstring）

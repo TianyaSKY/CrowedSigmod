@@ -103,7 +103,11 @@ class CrowdLoss(nn.Module):
         dice = 1.0 - ((2.0 * intersection + 1e-6) / (denominator + 1e-6)).mean()
         probability_loss = bce + self.dice_weight * dice
 
-        density_loss = F.smooth_l1_loss(density, density_gt, beta=self.smooth_l1_beta)
+        # 空间密度误差归一化：将整图空间像素绝对误差求和后再按 (count_gt + 1) 进行样本级归一化，
+        # 避免像素级均值导致 loss 长期处于 0.000x 量级、对零预测塌缩缺乏足够梯度惩罚的问题。
+        density_error = (density - density_gt).abs().flatten(1).sum(dim=1)
+        density_loss = (density_error / (count_gt + 1.0)).mean()
+
         predicted_count = density.flatten(1).sum(dim=1)
         # 除以 (count_gt + 1) 把绝对误差转为近似相对误差：大场景的绝对误差不再
         # 主导整体 loss，各样本量级可比；+1 平滑避免空图（count_gt=0）除零，
@@ -135,6 +139,10 @@ class CrowdLoss(nn.Module):
             "local": local_loss,
             "mae": mae.detach(),
             "predicted_count": predicted_count.detach(),
+            "pred_count": predicted_count.mean().detach(),
+            "gt_count": count_gt.mean().detach(),
+            "density_mean": density.mean().detach(),
+            "density_max": density.max().detach(),
         }
 
     def forward(self, outputs: Mapping[str, torch.Tensor], targets: Mapping[str, torch.Tensor]) -> torch.Tensor:

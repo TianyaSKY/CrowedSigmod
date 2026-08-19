@@ -112,14 +112,18 @@ class CrowdTrainer:
             if show_pbar and hasattr(pbar, "set_postfix"):
                 postfix = {"loss": f"{float(details['total'].detach()):.4f}"}
                 if "mae" in details:
-                    postfix["mae"] = f"{float(details['mae'].detach()):.2f}"
-                elif "count" in details:
-                    postfix["count_loss"] = f"{float(details['count'].detach()):.4f}"
+                    postfix["mae"] = f"{float(details['mae'].detach()):.1f}"
+                if "pred_count" in details and "gt_count" in details:
+                    postfix["pred"] = f"{float(details['pred_count'].detach()):.1f}"
+                    postfix["gt"] = f"{float(details['gt_count'].detach()):.1f}"
                 pbar.set_postfix(postfix)
 
         if steps == 0:
             raise ValueError("training loader is empty")
-        return {key: value / steps for key, value in running.items()}
+        res = {key: value / steps for key, value in running.items()}
+        if hasattr(self.model, "density_residual_alpha"):
+            res["skip_alpha"] = float(self.model.density_residual_alpha.detach().cpu().item())
+        return res
 
     def evaluate_dataset(
         self,
@@ -250,6 +254,15 @@ class CrowdTrainer:
             ]
             if "mae" in train_metrics:
                 train_log_parts.append(f"MAE: {train_metrics['mae']:.2f}")
+            if "pred_count" in train_metrics and "gt_count" in train_metrics:
+                train_log_parts.append(f"Pred: {train_metrics['pred_count']:.1f}")
+                train_log_parts.append(f"GT: {train_metrics['gt_count']:.1f}")
+            if "density_mean" in train_metrics:
+                train_log_parts.append(f"DMean: {train_metrics['density_mean']:.5f}")
+            if "density_max" in train_metrics:
+                train_log_parts.append(f"DMax: {train_metrics['density_max']:.3f}")
+            if "skip_alpha" in train_metrics:
+                train_log_parts.append(f"SkipAlpha: {train_metrics['skip_alpha']:.3f}")
             train_log_str = " | ".join(train_log_parts)
 
             val_metrics: dict[str, float] = {}
