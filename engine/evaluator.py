@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable
 
 import torch
+from tqdm import tqdm
 
 from inference.tiled_inference import DensityTiler
 
@@ -32,6 +33,8 @@ def evaluate_tiled(
     *,
     tiler: DensityTiler | None = None,
     device: str | torch.device | None = None,
+    total_samples: int | None = None,
+    show_pbar: bool = True,
 ) -> dict[str, float]:
     """评估确定性的整图；每个样本为 ``(image, count_gt)``。"""
 
@@ -40,7 +43,14 @@ def evaluate_tiled(
     # 真值是整图人数标量，reshape(1) 保持列向量以便 concat 后统一计算。
     predictions: list[torch.Tensor] = []
     targets: list[torch.Tensor] = []
-    for image, count_gt in samples:
+
+    iterator = (
+        tqdm(samples, total=total_samples, desc="Evaluating", dynamic_ncols=True, leave=False)
+        if show_pbar
+        else samples
+    )
+
+    for image, count_gt in iterator:
         result = tiler(model, image, device=device)
         predictions.append(result.count.cpu())
         targets.append(torch.as_tensor(count_gt).reshape(1).cpu())

@@ -78,7 +78,8 @@ count = Σ D（不取整，评估直接用浮点值）
 ## 安装
 
 ```bash
-pip install torch torchvision Pillow PyYAML
+conda activate dl
+pip install torch torchvision Pillow PyYAML loguru tqdm tensorboard
 pip install ultralytics        # 可选：YOLO 后端，缺失时自动回退到内置轻量编码器
 ```
 
@@ -170,7 +171,7 @@ D_final = Σ w·D_tile / (Σ w + ε)，N = Σ D_final
 pytest -q tests
 ```
 
-8 个行为测试：密度守恒（边界/角落/重叠点）、模型形状契约、损失可微、冻结梯度（backbone 为 None / head 非 None）、BN 统计冻结、tile 拼接守恒、预热余弦调度。测试不依赖数据集，可直接运行。
+9 个行为测试：密度守恒（边界/角落/重叠点）、模型形状契约、损失可微、冻结梯度（backbone 为 None / head 非 None）、BN 统计冻结、tile 拼接守恒、预热余弦调度、Trainer 循环与 TensorBoard/tqdm 集成。测试不依赖数据集，可直接运行。
 
 ## 接口约定
 

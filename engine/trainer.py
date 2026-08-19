@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from loguru import logger
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from .freeze_scheduler import FreezeScheduler, build_optimizer
 from .schedules import apply_warmup_cosine
@@ -46,7 +49,14 @@ class CrowdTrainer:
                 moved[key] = moved[key].to(self.device, non_blocking=True)
         return moved
 
-    def train_epoch(self, loader: DataLoader) -> dict[str, float]:
+    def train_epoch(
+        self,
+        loader: DataLoader,
+        *,
+        epoch: int | None = None,
+        total_epochs: int | None = None,
+        show_pbar: bool = True,
+    ) -> dict[str, float]:
         self.model.train()
         # model.train() 会递归把含冻结骨干在内的所有模块切回训练模式，
         # 因此必须紧接着把骨干 BN 重新压回 eval——顺序不能颠倒，否则
@@ -54,7 +64,19 @@ class CrowdTrainer:
         self.freeze_scheduler.enforce_batch_norm_state(self.model)
         running: dict[str, float] = {}
         steps = 0
-        for batch in loader:
+
+        desc = (
+            f"Epoch [{epoch + 1:03d}/{total_epochs:03d}]"
+            if epoch is not None and total_epochs is not None
+            else "Training"
+        )
+        pbar = (
+            tqdm(loader, desc=desc, dynamic_ncols=True, leave=False)
+            if show_pbar
+            else loader
+        )
+
+        for batch in pbar:
             batch = self._move_batch(batch)
             # set_to_none=True 把梯度置为 None 而非零张量：省去逐元素
             # 清零的写操作，释放旧梯度内存，反向传播时会按需重新分配。
@@ -71,6 +93,13 @@ class CrowdTrainer:
                 if value.ndim == 0 and torch.isfinite(value):
                     running[key] = running.get(key, 0.0) + float(value.detach())
             steps += 1
+
+            if show_pbar and hasattr(pbar, "set_postfix"):
+                postfix = {"loss": f"{float(details['total'].detach()):.4f}"}
+                if "count" in details:
+                    postfix["count_loss"] = f"{float(details['count'].detach()):.4f}"
+                pbar.set_postfix(postfix)
+
         if steps == 0:
             raise ValueError("training loader is empty")
         return {key: value / steps for key, value in running.items()}
@@ -83,6 +112,8 @@ class CrowdTrainer:
         checkpoint_dir: str | Path | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         warmup_epochs: int = 0,
+        writer: SummaryWriter | None = None,
+        show_pbar: bool = True,
     ) -> list[dict[str, float]]:
         history: list[dict[str, float]] = []
         for epoch in range(self.start_epoch, int(epochs)):
@@ -98,11 +129,35 @@ class CrowdTrainer:
                 # 未传入外部 scheduler 时使用内置 warmup+cosine；
                 # 二选一执行，避免对学习率做双重缩放。
                 apply_warmup_cosine(self.optimizer, epoch=epoch, total_epochs=epochs, warmup_epochs=warmup_epochs)
-            metrics = self.train_epoch(loader)
+
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            logger.info(
+                f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] start | Phase: {phase.value} | LR: {current_lr:.6e}"
+            )
+
+            metrics = self.train_epoch(
+                loader,
+                epoch=epoch,
+                total_epochs=int(epochs),
+                show_pbar=show_pbar,
+            )
             metrics["epoch"] = float(epoch)
             history.append(metrics)
+
+            metric_str = " | ".join(f"{k}: {v:.4f}" for k, v in metrics.items() if k != "epoch")
+            logger.info(f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] result | {metric_str}")
+
+            if writer is not None:
+                for key, val in metrics.items():
+                    if key != "epoch":
+                        writer.add_scalar(f"train/{key}", val, epoch + 1)
+                writer.add_scalar("train/lr", current_lr, epoch + 1)
+                writer.flush()
+
             if checkpoint_dir is not None:
-                self.save_checkpoint(Path(checkpoint_dir) / f"epoch_{epoch:03d}.pt", epoch, metrics)
+                ckpt_path = Path(checkpoint_dir) / f"epoch_{epoch:03d}.pt"
+                self.save_checkpoint(ckpt_path, epoch, metrics)
+                logger.info(f"Saved checkpoint -> {ckpt_path}")
         return history
 
     def save_checkpoint(self, path: str | Path, epoch: int, metrics: dict[str, float] | None = None) -> None:

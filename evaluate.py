@@ -8,6 +8,7 @@ from typing import Iterator
 
 import torch
 import yaml
+from loguru import logger
 
 from data.crowd_dataset import CrowdDataset
 from engine.evaluator import evaluate_tiled
@@ -43,6 +44,10 @@ def main() -> None:
         dynamic_crop=False,
         augment=False,
     )
+    logger.info(
+        f"Evaluating checkpoint '{args.checkpoint}' on split '{config['data'].get('val_split', 'val')}' ({len(dataset)} images)"
+    )
+
     # 训练时模型只见过固定尺寸裁剪，任意分辨率的整图必须切瓦片推理；
     # 固定分块 + 密度拼接后求和即得整图人数，且每次评估结果完全一致。
     # 这也与训练分布保持一致，避免直接缩放整图带来的计数偏差。
@@ -60,7 +65,10 @@ def main() -> None:
             output_stride=int(config["output_stride"]),
         ),
         device=args.device,
+        total_samples=len(dataset),
     )
+    metric_str = " | ".join(f"{k.upper()}: {v:.4f}" for k, v in metrics.items())
+    logger.success(f"Evaluation finished -> {metric_str}")
     print(metrics)
 
 

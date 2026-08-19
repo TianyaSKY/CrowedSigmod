@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 import torch
+from loguru import logger
 from PIL import Image
 
 from inference.tiled_inference import DensityTiler
@@ -37,7 +38,9 @@ def main() -> None:
     result = DensityTiler(args.tile_size, args.tile_stride, args.output_stride)(
         model, image_tensor(args.image), device=args.device
     )
-    print(f"count={float(result.count.item()):.4f}")
+    predicted_count = float(result.count.item())
+    logger.info(f"Inference image '{args.image}' -> Estimated count: {predicted_count:.4f}")
+    print(f"count={predicted_count:.4f}")
 
 
 if __name__ == "__main__":
