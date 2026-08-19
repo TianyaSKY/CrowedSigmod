@@ -315,18 +315,32 @@ class CrowdTrainer:
                         writer.add_scalar(f"val/{key}", val, epoch + 1)
                     writer.add_scalar("val/best_mae", self.best_metric, epoch + 1)
 
-                    # 3. 定期向 TensorBoard 记录可视化抽样图像
+                    # 3. 定期向 TensorBoard 记录可视化抽样图像 (4 面板：原图+GT点 | GT密度 | Pred密度 | 叠加)
                     try:
+                        from data.target_generator import generate_density_target
                         from utils.visualization import create_composite_figure, figure_to_tensor, save_figure
                         if val_dataset is not None and len(val_dataset) > 0:
                             sample_item = val_dataset.full_image(0)
                             sample_img = sample_item["image"]
                             sample_gt = float(sample_item["count_gt"].item())
+                            sample_pts = sample_item.get("points")
+                            sample_gt_dens = None
+                            if sample_pts is not None and len(sample_pts) > 0:
+                                s_h, s_w = sample_img.shape[-2:]
+                                out_stride = getattr(tiler, "output_stride", 4) if tiler else 4
+                                sample_gt_dens = generate_density_target(
+                                    sample_pts,
+                                    output_size=(max(1, s_h // out_stride), max(1, s_w // out_stride)),
+                                    output_stride=out_stride,
+                                    sigma=2.0,
+                                )
                             active_tiler = tiler or DensityTiler()
                             sample_res = active_tiler(self.model, sample_img, device=self.device)
                             fig = create_composite_figure(
                                 sample_img,
                                 sample_res.density,
+                                gt_density=sample_gt_dens,
+                                points=sample_pts,
                                 pred_count=float(sample_res.count.item()),
                                 gt_count=sample_gt,
                                 title=f"Epoch {epoch + 1} Val Sample | GT: {sample_gt:.1f} | Pred: {float(sample_res.count.item()):.1f}",

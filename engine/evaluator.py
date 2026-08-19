@@ -74,6 +74,7 @@ def evaluate_tiled(
                     "target_count": float(tgt_cnt.item()),
                     "error": float((pred_cnt - tgt_cnt).item()),
                     "density": result.density.cpu(),
+                    "points": item.get("points") if isinstance(item, dict) else None,
                     "image_id": image_id,
                 }
             )

@@ -270,7 +270,7 @@ class CrowdDataset(torch.utils.data.Dataset):
         return self.rng.randint(0, max_x), self.rng.randint(0, max_y), mode
 
     def full_image(self, index: int) -> dict[str, Any]:
-        """返回未裁剪的图像及其完整人数，用于分块评估。"""
+        """返回未裁剪的图像及其完整人数与点标注，用于分块评估与真实密度图可视化。"""
 
         record = self.records[index]
         with Image.open(record.image_path) as loaded:
@@ -282,6 +282,7 @@ class CrowdDataset(torch.utils.data.Dataset):
         return {
             "image": image_to_tensor(image),
             "count_gt": torch.tensor(float(len(points)), dtype=torch.float32),
+            "points": points,
             "image_id": record.image_id,
         }
 
@@ -311,9 +312,9 @@ class CrowdDataset(torch.utils.data.Dataset):
         probability_gt = targets["probability"].unsqueeze(0)
         density_gt = targets["density"].unsqueeze(0)
         count_gt = torch.tensor(targets["count"], dtype=torch.float32)
-        # 在线断言守恒（容差放宽到 2e-4，容纳 float32 累加误差）；
+        # 在线断言守恒（容差放宽到 1e-3，容纳 float32 大人群累加误差）；
         # 训练早期即可暴露标签生成的坐标/平移类 bug。
-        validate_density_conservation(density_gt, count_gt, tolerance=2e-4)
+        validate_density_conservation(density_gt, count_gt, tolerance=1e-3)
         return {
             "image": image_tensor,
             "points": crop_points_local,

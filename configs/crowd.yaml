@@ -35,7 +35,7 @@ loss:
   # Density power loss:
   # scale * |pred - gt| ^ power
   density_power: 1.5
-  density_scale: 10.0
+  density_scale: 5.0
 
   count: 0.5
   # 局部区域损失：把密度图切分成 local_grid x local_grid 块分别约束。
@@ -50,7 +50,7 @@ training:
   freeze_epochs: 15
   partial_unfreeze_epoch: 15
   full_unfreeze_epoch: 45
-  batch_size: 4
+  batch_size: 8
   workers: 4
   # 适中的基础学习率（微调场景推荐 5e-4）
   learning_rate: 0.0005

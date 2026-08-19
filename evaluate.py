@@ -9,6 +9,7 @@ import yaml
 from loguru import logger
 
 from data.crowd_dataset import CrowdDataset
+from data.target_generator import generate_density_target
 from engine.evaluator import evaluate_tiled
 from inference.tiled_inference import DensityTiler
 from models.crowd_counter import CrowdCounter
@@ -134,9 +135,24 @@ def main() -> None:
             clean_id = img_id.replace("/", "_").replace("\\", "_")
             pred_cnt = record["pred_count"]
             tgt_cnt = record["target_count"]
+            pts = record.get("points")
+            gt_density = None
+            if pts is not None and len(pts) > 0:
+                img_h, img_w = record["image"].shape[-2:]
+                out_stride = int(config.get("output_stride", 4))
+                out_h = max(1, img_h // out_stride)
+                out_w = max(1, img_w // out_stride)
+                gt_density = generate_density_target(
+                    pts,
+                    output_size=(out_h, out_w),
+                    output_stride=out_stride,
+                    sigma=float(config.get("targets", {}).get("density_sigma", 2.0)),
+                )
             fig = create_composite_figure(
                 image=record["image"],
                 pred_density=record["density"],
+                gt_density=gt_density,
+                points=pts,
                 pred_count=pred_cnt,
                 gt_count=tgt_cnt,
                 title=f"[{tag.upper()}] {clean_id} | GT: {tgt_cnt:.1f} | Pred: {pred_cnt:.1f} (Err: {abs(pred_cnt - tgt_cnt):.1f})",

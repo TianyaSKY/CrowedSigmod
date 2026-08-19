@@ -43,6 +43,7 @@ from torch.utils.data import ConcatDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from data.crowd_dataset import CrowdDataset, crowd_collate
+from data.target_generator import generate_density_target
 from engine.evaluator import evaluate_tiled
 from engine.freeze_scheduler import FreezeScheduler
 from engine.trainer import CrowdTrainer
@@ -349,9 +350,24 @@ def evaluate_dataset_split(
             img_id = (record["image_id"] or "sample").replace("/", "_").replace("\\", "_")
             pred_c = record["pred_count"]
             tgt_c = record["target_count"]
+            pts = record.get("points")
+            gt_density = None
+            if pts is not None and len(pts) > 0:
+                img_h, img_w = record["image"].shape[-2:]
+                out_stride = int(config.get("output_stride", 4))
+                out_h = max(1, img_h // out_stride)
+                out_w = max(1, img_w // out_stride)
+                gt_density = generate_density_target(
+                    pts,
+                    output_size=(out_h, out_w),
+                    output_stride=out_stride,
+                    sigma=float(config.get("targets", {}).get("density_sigma", 2.0)),
+                )
             fig = create_composite_figure(
                 image=record["image"],
                 pred_density=record["density"],
+                gt_density=gt_density,
+                points=pts,
                 pred_count=pred_c,
                 gt_count=tgt_c,
                 title=f"[{tag.upper()}] {img_id} | GT: {tgt_c:.1f} | Pred: {pred_c:.1f} (Err: {abs(pred_c - tgt_c):.1f})",
