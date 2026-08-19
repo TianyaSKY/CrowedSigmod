@@ -69,10 +69,12 @@ count = Σ D（不取整，评估直接用浮点值）
 │   ├── schedules.py          # 预热余弦调度
 │   └── evaluator.py          # MAE / RMSE / NAE
 ├── inference/tiled_inference.py  # 重叠 tile + 余弦权重密度拼接
-├── tests/                    # 8 个行为测试（守恒/形状/损失/冻结/拼接/调度）
+├── utils/visualization.py    # 密度热力图 / 叠加图 / 多面板对比 / 散点回归图生成
+├── tools/visualize_dataset.py # 数据集与高斯标签质检可视化脚本
+├── tests/                    # 16 个行为测试（守恒/形状/损失/冻结/拼接/调度/可视化）
 ├── train.py                  # 训练入口
-├── evaluate.py               # 整图固定 tiling 验证
-└── infer.py                  # 单图滑窗推理
+├── evaluate.py               # 整图固定 tiling 验证与误差散点/定性图导出
+└── infer.py                  # 单图滑窗推理与多视角热力图保存
 ```
 
 ## 安装
@@ -143,14 +145,17 @@ python train.py --config configs/crowd.yaml --epochs 10 --output runs/exp1   # �
 
 ```bash
 python evaluate.py --config configs/crowd.yaml --checkpoint runs/crowd/best.pt --device cuda
+# 可选生成回归散点图与定性样本对比：
+python evaluate.py --checkpoint runs/crowd/best.pt --visualize-dir runs/eval_vis --num-vis 10
 ```
 
-验证不做随机裁剪：整图固定 tiling → 每块推理 → 密度拼接 → 整图求和，保证每次评估完全一致。输出 MAE / RMSE / NAE。
+验证不做随机裁剪：整图固定 tiling → 每块推理 → 密度拼接 → 整图求和，保证每次评估完全一致。输出 MAE / RMSE / NAE，并自动保存真实人数 vs 预测人数的回归散点图 `gt_vs_pred_scatter.png`。
 
-## 推理
+## 推理与可视化
 
 ```bash
-python infer.py image.jpg --checkpoint runs/crowd/best.pt --tile-size 640 --tile-stride 512
+# 默认自动输出预测 JSON + 组合对比图 (*_composite.jpg) + 纯热力图 (*_heatmap.jpg) + 原图叠加图 (*_overlay.jpg)
+python infer.py image.jpg --checkpoint runs/crowd/best.pt --output runs/infer_results
 ```
 
 高分辨率原图不做整体 resize（会丢失小人头）。滑窗重叠区域使用二维余弦权重融合：
@@ -158,6 +163,16 @@ python infer.py image.jpg --checkpoint runs/crowd/best.pt --tile-size 640 --tile
 ```text
 D_final = Σ w·D_tile / (Σ w + ε)，N = Σ D_final
 ```
+
+## 数据集质检可视化
+
+在模型训练或数据准备阶段，可使用质检工具直接检查点标注解析、高斯核密度积分守恒与概率图质量：
+
+```bash
+python tools/visualize_dataset.py --data-root data/UCF-QNRF_ECCV18 --split train --num-samples 5 --output-dir runs/dataset_vis
+```
+产物包含：`[裁剪原图 + 点标注] | [守恒密度图 GT (ΣD = N)] | [概率图 GT] | [密度图叠加图]` 4 面板高分辨率大图。
+
 
 ## 目标生成
 
