@@ -72,7 +72,8 @@ count = Σ D（不取整，评估直接用浮点值）
 ├── utils/visualization.py    # 密度热力图 / 叠加图 / 多面板对比 / 散点回归图生成
 ├── tools/visualize_dataset.py # 数据集与高斯标签质检可视化脚本
 ├── tests/                    # 16 个行为测试（守恒/形状/损失/冻结/拼接/调度/可视化）
-├── train.py                  # 训练入口
+├── train.py                  # 单数据集训练入口
+├── train_all.py              # 全数据集一键训练/联合训练与跨数据集基准评测
 ├── evaluate.py               # 整图固定 tiling 验证与误差散点/定性图导出
 └── infer.py                  # 单图滑窗推理与多视角热力图保存
 ```
@@ -150,6 +151,34 @@ python evaluate.py --checkpoint runs/crowd/best.pt --visualize-dir runs/eval_vis
 ```
 
 验证不做随机裁剪：整图固定 tiling → 每块推理 → 密度拼接 → 整图求和，保证每次评估完全一致。输出 MAE / RMSE / NAE，并自动保存真实人数 vs 预测人数的回归散点图 `gt_vs_pred_scatter.png`。
+
+## 全数据集训练与跨数据集基准评测 (Train & Benchmark All Datasets)
+
+通过 `train_all.py` 可以一键对仓库内所有人群计数数据集（`ucf_qnrf`、`shanghaitech_AB`、`jhu_crowd`、`ucf_cc50`）进行批量自动化训练与验证评测：
+
+```bash
+# 1. 顺序基准模式（默认）：对所有数据集依次训练并在测试集评估，生成跨数据集对比总表与柱状图
+python train_all.py --device cuda --output runs/all_datasets
+
+# 2. 针对指定数据集子集快速训练（覆盖轮数与批大小）
+python train_all.py --datasets ucf_qnrf shanghaitech_AB --epochs 50 --batch-size 4 --device cuda
+
+# 3. UCF-CC-50 5 折交叉验证完整测试
+python train_all.py --datasets ucf_cc50 --ucf-cc50-folds all --epochs 50 --device cuda
+
+# 4. 联合混合训练模式：将所有数据集 train split 拼接联合训练单一通用模型，并在各个测试集上评估泛化能力
+python train_all.py --mode joint --epochs 80 --output runs/joint_exp --device cuda
+
+# 5. 跨数据集批量验证模式：加载已有检查点直接在所有数据集上做基准测试
+python train_all.py --mode eval_only --checkpoint runs/all_datasets/ucf_qnrf/best.pt
+```
+
+评测产物集中输出至 `--output` 指定目录，包含：
+- **`summary_report.md`**：Markdown 格式的跨数据集综合 Benchmark 评测报告。
+- **`summary_metrics.json` / `summary_metrics.csv`**：结构化指标大表（含 Macro-Average 平均指标）。
+- **`benchmark_comparison.png`**：MAE / RMSE 跨数据集横向对比高清柱状图。
+- 逐数据集专属子目录：`best.pt`、`last.pt`、`metrics.json`、`test_scatter.png` 与 `test_vis/` 定性样本图。
+
 
 ## 推理与可视化
 

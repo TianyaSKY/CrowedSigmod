@@ -95,8 +95,10 @@ class CrowdDataset(torch.utils.data.Dataset):
             root / split,
             root / split.capitalize(),
             root / split.lower(),
-            root,
         ]
+        if split in {"", ".", "root"}:
+            candidates.append(root)
+
         for candidate in candidates:
             if candidate.exists() and any(candidate.glob("*")):
                 # 检查该目录下是否有图片
