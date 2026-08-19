@@ -137,12 +137,12 @@ python train.py --config configs/crowd.yaml --epochs 10 --output runs/exp1   # �
 | 10–30 | 解冻高层（Stage3/4） | 训练 | + backbone 高 0.1× |
 | 30–100 | 全解冻 | 训练 | + backbone 低 0.03× |
 
-优化器 AdamW（base_lr 1e-3，wd 1e-4），调度 warmup + cosine。检查点保存到输出目录 `epoch_NNN.pt`（模型 / 优化器 / 调度状态），可随时断点续训。
+优化器 AdamW（base_lr 1e-3，wd 1e-4），调度 warmup + cosine。训练过程中定期执行整图验证，检查点仅保存 `last.pt`（最新轮次）与 `best.pt`（最优验证 MAE 轮次），大幅节省磁盘空间，并支持无缝断点续训。
 
 ## 评估
 
 ```bash
-python evaluate.py --config configs/crowd.yaml --checkpoint runs/crowd/epoch_099.pt --device cuda
+python evaluate.py --config configs/crowd.yaml --checkpoint runs/crowd/best.pt --device cuda
 ```
 
 验证不做随机裁剪：整图固定 tiling → 每块推理 → 密度拼接 → 整图求和，保证每次评估完全一致。输出 MAE / RMSE / NAE。
@@ -150,7 +150,7 @@ python evaluate.py --config configs/crowd.yaml --checkpoint runs/crowd/epoch_099
 ## 推理
 
 ```bash
-python infer.py image.jpg --checkpoint runs/crowd/epoch_099.pt --tile-size 640 --tile-stride 512
+python infer.py image.jpg --checkpoint runs/crowd/best.pt --tile-size 640 --tile-stride 512
 ```
 
 高分辨率原图不做整体 resize（会丢失小人头）。滑窗重叠区域使用二维余弦权重融合：
