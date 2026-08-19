@@ -18,6 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from data.crowd_dataset import CrowdDataset, crowd_collate
 from engine.freeze_scheduler import FreezeScheduler
 from engine.trainer import CrowdTrainer
+from inference.tiled_inference import DensityTiler
 from losses.crowd_loss import CrowdLoss
 from models.crowd_counter import CrowdCounter
 
@@ -125,6 +126,32 @@ def main() -> None:
     )
     epochs = int(args.epochs if args.epochs is not None else train_cfg["epochs"])
 
+    val_split = data_cfg.get("val_split", "val")
+    val_image_dir = root / "images" / val_split
+    val_dataset = None
+    if val_image_dir.exists():
+        val_dataset = CrowdDataset(
+            root,
+            val_split,
+            crop_size=int(config["image_size"]),
+            output_stride=int(config["output_stride"]),
+            dynamic_crop=False,
+            augment=False,
+        )
+        logger.info(
+            f"Validation dataset initialized from {root} (split: '{val_split}', samples: {len(val_dataset)})"
+        )
+    else:
+        logger.warning(
+            f"Validation directory not found at '{val_image_dir}'. Periodic evaluation will be skipped."
+        )
+
+    tiler = DensityTiler(
+        tile_size=int(config.get("inference", {}).get("tile_size", 640)),
+        tile_stride=int(config.get("inference", {}).get("tile_stride", 512)),
+        output_stride=int(config.get("output_stride", 4)),
+    )
+
     tb_dir = output_dir / "tensorboard"
     writer = SummaryWriter(log_dir=str(tb_dir))
     logger.info(f"TensorBoard summary writer active at {tb_dir}")
@@ -135,6 +162,9 @@ def main() -> None:
             loader,
             epochs=epochs,
             checkpoint_dir=output_dir,
+            val_dataset=val_dataset,
+            val_interval=int(train_cfg.get("val_interval", 1)),
+            tiler=tiler,
             # warmup 取 min(warmup_epochs, epochs)，防止命令行缩短训练轮数后预热越界。
             warmup_epochs=min(int(train_cfg.get("warmup_epochs", 0)), epochs),
             writer=writer,

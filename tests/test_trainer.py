@@ -46,13 +46,23 @@ def test_trainer_fit_with_tensorboard_and_tqdm() -> None:
             loader,
             epochs=2,
             checkpoint_dir=ckpt_dir,
+            val_loader=loader,
             writer=writer,
             show_pbar=True,
         )
         writer.close()
 
         assert len(history) == 2
-        assert (ckpt_dir / "epoch_000.pt").exists()
-        assert (ckpt_dir / "epoch_001.pt").exists()
+        assert (ckpt_dir / "last.pt").exists()
+        assert (ckpt_dir / "best.pt").exists()
+        assert not (ckpt_dir / "epoch_000.pt").exists()
         assert (ckpt_dir / "metrics.json").exists()
         assert any(tb_dir.glob("events.out.tfevents.*"))
+
+        # 测试断点恢复与加载：best.pt 对应记录的最优轮次，last.pt 对应最后一轮 (1)
+        loaded_best = trainer.load_checkpoint(ckpt_dir / "best.pt")
+        assert loaded_best["epoch"] == trainer.best_epoch
+
+        loaded_last = trainer.load_checkpoint(ckpt_dir / "last.pt")
+        assert loaded_last["epoch"] == 1
+        assert trainer.start_epoch == 2

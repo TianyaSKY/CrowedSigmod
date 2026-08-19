@@ -1,10 +1,10 @@
-"""围绕共享的模型/损失接口构建的最小训练循环。"""
+"""围绕共享的模型/损失接口构建的最小训练循环与验证/保存机制。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import torch
 from loguru import logger
@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from inference.tiled_inference import DensityTiler
+from .evaluator import counting_metrics, evaluate_tiled
 from .freeze_scheduler import FreezeScheduler, build_optimizer
 from .schedules import apply_warmup_cosine
 
@@ -40,13 +42,15 @@ class CrowdTrainer:
         )
         self.grad_clip_norm = grad_clip_norm
         self.start_epoch = 0
+        self.best_metric = float("inf")
+        self.best_epoch = -1
 
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         moved = dict(batch)
         # non_blocking=True 在 CUDA 上发起异步拷贝，可与后续前向计算
         # 重叠；键可能缺失（训练与验证的标注组合不同），缺失时跳过即可。
         for key in ("image", "probability_gt", "density_gt", "count_gt"):
-            if key in moved:
+            if key in moved and isinstance(moved[key], torch.Tensor):
                 moved[key] = moved[key].to(self.device, non_blocking=True)
         return moved
 
@@ -67,7 +71,7 @@ class CrowdTrainer:
         steps = 0
 
         desc = (
-            f"Epoch [{epoch + 1:03d}/{total_epochs:03d}]"
+            f"Epoch [{epoch + 1:03d}/{total_epochs:03d}] Train"
             if epoch is not None and total_epochs is not None
             else "Training"
         )
@@ -91,13 +95,17 @@ class CrowdTrainer:
             for key, value in details.items():
                 # 只累计标量且有限的项（跳过 NaN/Inf 与向量项），
                 # 最后按步数取平均，得到每 epoch 的损失/指标汇总。
-                if value.ndim == 0 and torch.isfinite(value):
+                if isinstance(value, torch.Tensor) and value.ndim == 0 and torch.isfinite(value):
                     running[key] = running.get(key, 0.0) + float(value.detach())
+                elif isinstance(value, (int, float)):
+                    running[key] = running.get(key, 0.0) + float(value)
             steps += 1
 
             if show_pbar and hasattr(pbar, "set_postfix"):
                 postfix = {"loss": f"{float(details['total'].detach()):.4f}"}
-                if "count" in details:
+                if "mae" in details:
+                    postfix["mae"] = f"{float(details['mae'].detach()):.2f}"
+                elif "count" in details:
                     postfix["count_loss"] = f"{float(details['count'].detach()):.4f}"
                 pbar.set_postfix(postfix)
 
@@ -105,18 +113,93 @@ class CrowdTrainer:
             raise ValueError("training loader is empty")
         return {key: value / steps for key, value in running.items()}
 
+    def evaluate_dataset(
+        self,
+        dataset: Any,
+        *,
+        tiler: DensityTiler | None = None,
+        show_pbar: bool = True,
+    ) -> dict[str, float]:
+        """使用整图瓦片平铺（Tiled Inference）执行确定性验证。"""
+        self.model.eval()
+
+        def _samples() -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+            for index in range(len(dataset)):
+                item = (
+                    dataset.full_image(index)
+                    if hasattr(dataset, "full_image")
+                    else (dataset[index]["image"], dataset[index]["count_gt"])
+                )
+                if isinstance(item, dict):
+                    yield item["image"], item["count_gt"]
+                else:
+                    yield item[0], item[1]
+
+        return evaluate_tiled(
+            self.model,
+            _samples(),
+            tiler=tiler or DensityTiler(),
+            device=self.device,
+            total_samples=len(dataset),
+            show_pbar=show_pbar,
+        )
+
+    def evaluate_loader(
+        self,
+        loader: DataLoader,
+        *,
+        show_pbar: bool = True,
+    ) -> dict[str, float]:
+        """在常规 DataLoader 批次上执行验证评估。"""
+        self.model.eval()
+        predictions: list[torch.Tensor] = []
+        targets: list[torch.Tensor] = []
+        val_losses: dict[str, float] = {}
+        steps = 0
+
+        iterator = (
+            tqdm(loader, desc="Validating", dynamic_ncols=True, leave=False)
+            if show_pbar
+            else loader
+        )
+
+        with torch.no_grad():
+            for batch in iterator:
+                batch = self._move_batch(batch)
+                outputs = self.model(batch["image"])
+                details = self.criterion.compute(outputs, batch)  # type: ignore[attr-defined]
+                predictions.append(outputs["count"].detach().cpu())
+                targets.append(torch.as_tensor(batch["count_gt"]).detach().cpu().reshape(-1))
+                for key, value in details.items():
+                    if isinstance(value, torch.Tensor) and value.ndim == 0 and torch.isfinite(value):
+                        val_losses[key] = val_losses.get(key, 0.0) + float(value.detach())
+                steps += 1
+
+        if not predictions:
+            raise ValueError("validation loader is empty")
+
+        metrics = counting_metrics(torch.cat(predictions), torch.cat(targets))
+        if steps > 0:
+            for key, value in val_losses.items():
+                metrics[f"loss_{key}"] = value / steps
+        return metrics
+
     def fit(
         self,
         loader: DataLoader,
         *,
         epochs: int,
         checkpoint_dir: str | Path | None = None,
+        val_dataset: Any = None,
+        val_loader: DataLoader | None = None,
+        val_interval: int = 1,
+        tiler: DensityTiler | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         warmup_epochs: int = 0,
         writer: SummaryWriter | None = None,
         show_pbar: bool = True,
-    ) -> list[dict[str, float]]:
-        history: list[dict[str, float]] = []
+    ) -> list[dict[str, Any]]:
+        history: list[dict[str, Any]] = []
         for epoch in range(self.start_epoch, int(epochs)):
             phase = self.freeze_scheduler.apply(self.model, epoch)
             # 新启用的骨干网络参数需要新的参数组。显式重建可确保
@@ -133,48 +216,128 @@ class CrowdTrainer:
 
             current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
-                f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] start | Phase: {phase.value} | LR: {current_lr:.6e}"
+                f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] Start | Phase: {phase.value} | LR: {current_lr:.6e}"
             )
 
-            metrics = self.train_epoch(
+            train_metrics = self.train_epoch(
                 loader,
                 epoch=epoch,
                 total_epochs=int(epochs),
                 show_pbar=show_pbar,
             )
-            metrics["epoch"] = float(epoch)
-            history.append(metrics)
 
-            metric_str = " | ".join(f"{k}: {v:.4f}" for k, v in metrics.items() if k != "epoch")
-            logger.info(f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] result | {metric_str}")
+            # 格式化训练日志
+            train_log_parts = [
+                f"Total: {train_metrics.get('total', 0.0):.4f}",
+                f"Prob: {train_metrics.get('probability', 0.0):.4f}",
+                f"Dens: {train_metrics.get('density', 0.0):.4f}",
+                f"Count: {train_metrics.get('count', 0.0):.4f}",
+                f"Local: {train_metrics.get('local', 0.0):.4f}",
+            ]
+            if "mae" in train_metrics:
+                train_log_parts.append(f"MAE: {train_metrics['mae']:.2f}")
+            train_log_str = " | ".join(train_log_parts)
 
+            val_metrics: dict[str, float] = {}
+            do_val = (val_dataset is not None or val_loader is not None) and (
+                (epoch + 1) % max(1, val_interval) == 0 or epoch + 1 == int(epochs)
+            )
+
+            if do_val:
+                if val_dataset is not None:
+                    val_metrics = self.evaluate_dataset(val_dataset, tiler=tiler, show_pbar=show_pbar)
+                elif val_loader is not None:
+                    val_metrics = self.evaluate_loader(val_loader, show_pbar=show_pbar)
+
+                val_mae = val_metrics.get("mae", float("inf"))
+                is_best = val_mae < self.best_metric
+                if is_best:
+                    self.best_metric = val_mae
+                    self.best_epoch = epoch
+
+                val_log_str = (
+                    f"MAE: {val_metrics.get('mae', 0.0):.2f} | "
+                    f"RMSE: {val_metrics.get('rmse', 0.0):.2f} | "
+                    f"NAE: {val_metrics.get('nae', 0.0):.4f} | "
+                    f"Best MAE: {self.best_metric:.2f} (Ep {self.best_epoch + 1})"
+                )
+                logger.info(
+                    f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] Result -> Train [{train_log_str}] | Val [{val_log_str}]"
+                )
+            else:
+                # 无验证集时以训练指标为准跟踪最优模型
+                current_score = train_metrics.get("mae", train_metrics.get("total", float("inf")))
+                is_best = current_score < self.best_metric
+                if is_best:
+                    self.best_metric = current_score
+                    self.best_epoch = epoch
+                logger.info(
+                    f"Epoch [{epoch + 1:03d}/{int(epochs):03d}] Result -> Train [{train_log_str}]"
+                )
+
+            # 写入 TensorBoard
             if writer is not None:
-                for key, val in metrics.items():
-                    if key != "epoch":
-                        writer.add_scalar(f"train/{key}", val, epoch + 1)
+                # 1. 训练阶段各项指标
+                for key, val in train_metrics.items():
+                    writer.add_scalar(f"train/{key}", val, epoch + 1)
                 writer.add_scalar("train/lr", current_lr, epoch + 1)
+
+                # 2. 验证阶段各项指标
+                if val_metrics:
+                    for key, val in val_metrics.items():
+                        writer.add_scalar(f"val/{key}", val, epoch + 1)
+                    writer.add_scalar("val/best_mae", self.best_metric, epoch + 1)
                 writer.flush()
 
+            # 记录历史
+            epoch_record = {
+                "epoch": epoch,
+                "lr": current_lr,
+                "train": train_metrics,
+                "val": val_metrics,
+                "best_metric": self.best_metric,
+                "best_epoch": self.best_epoch,
+            }
+            history.append(epoch_record)
+
+            # 保存 checkpoint：只保留 last.pt 与 best.pt
             if checkpoint_dir is not None:
                 ckpt_dir = Path(checkpoint_dir)
-                ckpt_path = ckpt_dir / f"epoch_{epoch:03d}.pt"
-                self.save_checkpoint(ckpt_path, epoch, metrics)
-                logger.info(f"Saved checkpoint -> {ckpt_path}")
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+                # 始终保存/覆盖 last.pt
+                last_path = ckpt_dir / "last.pt"
+                self.save_checkpoint(last_path, epoch, epoch_record)
+
+                # 达到更优指标时保存/覆盖 best.pt
+                if is_best:
+                    best_path = ckpt_dir / "best.pt"
+                    self.save_checkpoint(best_path, epoch, epoch_record)
+                    logger.success(
+                        f"★ New best checkpoint (Metric: {self.best_metric:.4f}) saved -> {best_path}"
+                    )
+
                 metrics_json = ckpt_dir / "metrics.json"
                 metrics_json.write_text(json.dumps(history, indent=2, ensure_ascii=False))
         return history
 
-    def save_checkpoint(self, path: str | Path, epoch: int, metrics: dict[str, float] | None = None) -> None:
+    def save_checkpoint(
+        self,
+        path: str | Path,
+        epoch: int,
+        metrics: dict[str, Any] | None = None,
+    ) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # 快照内容：模型权重、优化器状态（Adam 的动量/方差，续训必需）、
-        # 冻结调度器状态（恢复后阶段与解冻边界一致）、当前 epoch 与指标。
+        # 快照内容：模型权重、优化器状态、最佳指标信息、冻结调度器状态
         torch.save(
             {
                 "epoch": int(epoch),
                 "model": self.model.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
                 "metrics": metrics or {},
+                "best_metric": float(self.best_metric),
+                "best_epoch": int(self.best_epoch),
                 "freeze_scheduler": self.freeze_scheduler.state_dict(),
             },
             path,
@@ -183,9 +346,20 @@ class CrowdTrainer:
     def load_checkpoint(self, path: str | Path, *, strict: bool = True) -> dict[str, Any]:
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model"], strict=strict)
+        saved_epoch = int(checkpoint.get("epoch", -1))
+        if "freeze_scheduler" in checkpoint and hasattr(self.freeze_scheduler, "load_state_dict"):
+            self.freeze_scheduler.load_state_dict(checkpoint["freeze_scheduler"])
+        elif saved_epoch >= 0:
+            self.freeze_scheduler.apply(self.model, saved_epoch)
+
         if "optimizer" in checkpoint:
-            # 恢复优化器状态以无缝续训；旧版 checkpoint 可能没有该键，判空兼容。
+            # 恢复与检查点所在阶段相匹配的参数组结构，再加载优化器状态
+            self.optimizer = build_optimizer(self.model, base_lr=self.optimizer.defaults.get("lr", 1e-3))
             self.optimizer.load_state_dict(checkpoint["optimizer"])
-        # 从断点后的下一个 epoch 继续训练，配合 fit 的 range(start_epoch, epochs)。
-        self.start_epoch = int(checkpoint.get("epoch", -1)) + 1
+        if "best_metric" in checkpoint:
+            self.best_metric = float(checkpoint["best_metric"])
+        if "best_epoch" in checkpoint:
+            self.best_epoch = int(checkpoint["best_epoch"])
+        self.start_epoch = saved_epoch + 1
         return checkpoint
+

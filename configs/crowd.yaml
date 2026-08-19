@@ -46,12 +46,14 @@ training:
   # 达到 full_unfreeze_epoch 完全解冻。
   partial_unfreeze_epoch: 10
   full_unfreeze_epoch: 30
-  batch_size: 2
+  batch_size: 4
   workers: 4
-  learning_rate: 0.001
+  learning_rate: 0.002
   weight_decay: 0.0001
   # 学习率预热轮数：线性升至峰值后再按余弦衰减。
   warmup_epochs: 3
+  # 验证评估频率（每隔多少个 epoch 执行一次全图验证）
+  val_interval: 1
 
 inference:
   # 推理瓦片边长（须能被 output_stride 整除）。
