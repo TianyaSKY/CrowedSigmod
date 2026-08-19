@@ -1,8 +1,7 @@
 """全数据集批量质检与真实密度图可视化脚本。
 
-遍历 datasets/ 或 data/ 下的所有数据集与划分（train/val/test/folds），
-批量生成包含 [Patch+Points | Density GT | Probability GT | Density Overlay] 的 4 面板高质检图，
-便于全面排查和核验所有数据集的标注与密度图生成质量。
+支持遍历 datasets/ 或 data/ 下的所有数据集与划分（train/val/test/folds），
+批量生成包含 [Full Image+Points | Full Density GT | Full Probability GT | Density Overlay] 的 4 面板高质检图。
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ import yaml
 from loguru import logger
 
 from data.crowd_dataset import CrowdDataset
-from tools.visualize_dataset import create_dataset_inspection_figure
+from tools.visualize_dataset import create_dataset_inspection_figure, create_full_image_inspection_figure
 from utils.visualization import save_figure
 
 
@@ -82,12 +81,18 @@ def main() -> None:
         help="Export all samples without capping at --samples-per-split",
     )
     parser.add_argument(
+        "--mode",
+        choices=["full", "patch"],
+        default="full",
+        help="Visualization mode: full (whole image) or patch (cropped window)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("runs/all_datasets_vis"),
         help="Directory to save inspection visualizations",
     )
-    parser.add_argument("--crop-size", type=int, default=640, help="Crop window size")
+    parser.add_argument("--crop-size", type=int, default=640, help="Crop window size for patch mode")
     parser.add_argument("--output-stride", type=int, default=4, help="Density stride reduction")
     parser.add_argument("--colormap", default="jet", help="Colormap for density maps")
     args = parser.parse_args()
@@ -140,14 +145,28 @@ def main() -> None:
         target_out_dir = args.output_dir / ds_name / split
         target_out_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Visualizing [{ds_name} / {split}] ({num_samples}/{len(ds)} samples) -> {target_out_dir}")
+        logger.info(f"Visualizing [{ds_name} / {split}] ({num_samples}/{len(ds)} samples, mode={args.mode}) -> {target_out_dir}")
 
         for idx in range(num_samples):
             try:
-                sample = ds[idx]
-                image_id = str(sample.get("image_id", f"idx_{idx:04d}")).replace("/", "_").replace("\\", "_")
-                count = float(sample.get("count_gt", 0.0))
-                fig = create_dataset_inspection_figure(sample, colormap=args.colormap)
+                if args.mode == "full":
+                    full_item = ds.full_image(idx)
+                    image_id = str(full_item.get("image_id", f"idx_{idx:04d}")).replace("/", "_").replace("\\", "_")
+                    count = float(full_item.get("count_gt", 0.0).item() if isinstance(full_item.get("count_gt"), torch.Tensor) else full_item.get("count_gt", 0.0))
+                    fig = create_full_image_inspection_figure(
+                        image=full_item["image"],
+                        points=full_item.get("points"),
+                        count=count,
+                        image_id=image_id,
+                        output_stride=args.output_stride,
+                        colormap=args.colormap,
+                    )
+                else:
+                    sample = ds[idx]
+                    image_id = str(sample.get("image_id", f"idx_{idx:04d}")).replace("/", "_").replace("\\", "_")
+                    count = float(sample.get("count_gt", 0.0))
+                    fig = create_dataset_inspection_figure(sample, colormap=args.colormap)
+
                 out_file = target_out_dir / f"{idx + 1:03d}_{image_id}_cnt{int(round(count))}.jpg"
                 save_figure(fig, out_file)
                 total_images_saved += 1
