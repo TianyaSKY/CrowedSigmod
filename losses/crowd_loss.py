@@ -116,6 +116,9 @@ class CrowdLoss(nn.Module):
         # grid×grid 子区域分别做相对误差，把密度监督细化到空间分布。
         local_loss = ((predicted_local - target_local).abs() / (target_local + 1.0)).mean()
 
+        # 原始未归一化 MAE（绝对人数误差）：供监控训练集实际人数偏差与日志记录。
+        mae = (predicted_count - count_gt).abs().mean()
+
         # 四项按 LossWeights 加权求和；权重集中在 dataclass 中配置，便于实验调参。
         total = (
             self.weights.probability * probability_loss
@@ -130,6 +133,7 @@ class CrowdLoss(nn.Module):
             "density": density_loss,
             "count": count_loss,
             "local": local_loss,
+            "mae": mae.detach(),
             "predicted_count": predicted_count.detach(),
         }
 
