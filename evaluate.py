@@ -86,11 +86,18 @@ def main() -> None:
     metrics, detailed_records = evaluate_tiled(
         model,
         _samples(),
-        tiler=DensityTiler(
-            tile_size=int(config["inference"]["tile_size"]),
-            tile_stride=int(config["inference"]["tile_stride"]),
-            output_stride=int(config["output_stride"]),
-        ),
+    tiler = DensityTiler(
+        tile_size=int(config["inference"]["tile_size"]),
+        tile_stride=int(config["inference"]["tile_stride"]),
+        output_stride=int(config["output_stride"]),
+        batch_size=8,
+        use_amp=True,
+    )
+
+    metrics, detailed_records = evaluate_tiled(
+        model,
+        _samples(),
+        tiler=tiler,
         device=args.device,
         total_samples=len(dataset),
         return_details=True,
@@ -116,7 +123,7 @@ def main() -> None:
         save_figure(scatter_fig, scatter_path)
         logger.info(f"Scatter plot saved to {scatter_path}")
 
-    # 2. 导出定性样本对比大图（兼顾最大误差样本、最小误差样本和随机抽样）
+    # 2. 导出定性样本对比大图（兼顾最大误差样本与最小误差样本，按需重新生成避免内存爆炸）
     if vis_dir is not None and args.num_vis > 0 and detailed_records:
         # 按绝对误差从大到小排序
         sorted_records = sorted(detailed_records, key=lambda r: abs(r["error"]), reverse=True)
@@ -130,27 +137,34 @@ def main() -> None:
         for rank, r in enumerate(sorted_records[-half:]):
             selected_records.append((f"best_{rank + 1:02d}", r))
 
+        out_stride = int(config.get("output_stride", 4))
+        density_sigma = float(config.get("targets", {}).get("density_sigma", 2.0))
+
         for tag, record in selected_records:
-            img_id = record["image_id"] or "sample"
+            sample_idx = record.get("index", 0)
+            sample_item = dataset.full_image(sample_idx)
+            sample_image = sample_item["image"]
+            sample_pred = tiler(model, sample_image, device=args.device)
+
+            img_id = record.get("image_id") or "sample"
             clean_id = img_id.replace("/", "_").replace("\\", "_")
             pred_cnt = record["pred_count"]
             tgt_cnt = record["target_count"]
-            pts = record.get("points")
+            pts = sample_item.get("points")
             gt_density = None
             if pts is not None and len(pts) > 0:
-                img_h, img_w = record["image"].shape[-2:]
-                out_stride = int(config.get("output_stride", 4))
+                img_h, img_w = sample_image.shape[-2:]
                 out_h = max(1, img_h // out_stride)
                 out_w = max(1, img_w // out_stride)
                 gt_density = generate_density_target(
                     pts,
                     output_size=(out_h, out_w),
                     output_stride=out_stride,
-                    sigma=float(config.get("targets", {}).get("density_sigma", 2.0)),
+                    sigma=density_sigma,
                 )
             fig = create_composite_figure(
-                image=record["image"],
-                pred_density=record["density"],
+                image=sample_image,
+                pred_density=sample_pred.density,
                 gt_density=gt_density,
                 points=pts,
                 pred_count=pred_cnt,

@@ -50,7 +50,7 @@ def evaluate_tiled(
         else samples
     )
 
-    for item in iterator:
+    for idx, item in enumerate(iterator):
         if isinstance(item, dict):
             image = item["image"]
             count_gt = item["count_gt"]
@@ -67,13 +67,13 @@ def evaluate_tiled(
         targets.append(tgt_cnt)
 
         if return_details:
+            # 仅保留标量与元数据，避免将数百张高分辨率原图与密度张量驻留内存导致 OOM / Swap 卡顿
             detailed_records.append(
                 {
-                    "image": image.cpu(),
+                    "index": idx,
                     "pred_count": float(pred_cnt.item()),
                     "target_count": float(tgt_cnt.item()),
                     "error": float((pred_cnt - tgt_cnt).item()),
-                    "density": result.density.cpu(),
                     "points": item.get("points") if isinstance(item, dict) else None,
                     "image_id": image_id,
                 }

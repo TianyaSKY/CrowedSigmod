@@ -296,6 +296,7 @@ def evaluate_dataset_split(
     save_scatter: bool = True,
     num_vis: int = 6,
     colormap: str = "jet",
+    config: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     """对指定数据集 split 进行确定性整图滑窗测试并导出散点图与定性可视化。"""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -334,7 +335,7 @@ def evaluate_dataset_split(
         scatter_path = out_dir / f"{split_name}_scatter.png"
         save_figure(scatter_fig, scatter_path)
 
-    # 导出定性分析图 (难例与优秀样本)
+    # 导出定性分析图 (仅对选取的难例与优秀样本按需重新推断生成，极大节省内存)
     if num_vis > 0 and detailed_records:
         vis_dir = out_dir / f"{split_name}_vis"
         vis_dir.mkdir(parents=True, exist_ok=True)
@@ -346,26 +347,33 @@ def evaluate_dataset_split(
         for rank, r in enumerate(sorted_records[-half:]):
             selected.append((f"best_{rank + 1:02d}", r))
 
+        out_stride = int(config.get("output_stride", 4)) if config else getattr(tiler, "output_stride", 4)
+        density_sigma = float(config.get("targets", {}).get("density_sigma", 2.0)) if config else 2.0
+
         for tag, record in selected:
-            img_id = (record["image_id"] or "sample").replace("/", "_").replace("\\", "_")
+            sample_idx = record.get("index", 0)
+            sample_item = dataset.full_image(sample_idx)
+            sample_image = sample_item["image"]
+            sample_pred = tiler(model, sample_image, device=device)
+
+            img_id = (record.get("image_id") or "sample").replace("/", "_").replace("\\", "_")
             pred_c = record["pred_count"]
             tgt_c = record["target_count"]
-            pts = record.get("points")
+            pts = sample_item.get("points")
             gt_density = None
             if pts is not None and len(pts) > 0:
-                img_h, img_w = record["image"].shape[-2:]
-                out_stride = int(config.get("output_stride", 4))
+                img_h, img_w = sample_image.shape[-2:]
                 out_h = max(1, img_h // out_stride)
                 out_w = max(1, img_w // out_stride)
                 gt_density = generate_density_target(
                     pts,
                     output_size=(out_h, out_w),
                     output_stride=out_stride,
-                    sigma=float(config.get("targets", {}).get("density_sigma", 2.0)),
+                    sigma=density_sigma,
                 )
             fig = create_composite_figure(
-                image=record["image"],
-                pred_density=record["density"],
+                image=sample_image,
+                pred_density=sample_pred.density,
                 gt_density=gt_density,
                 points=pts,
                 pred_count=pred_c,
@@ -491,6 +499,8 @@ def train_single_dataset(
             tile_size=int(config.get("inference", {}).get("tile_size", 640)),
             tile_stride=int(config.get("inference", {}).get("tile_stride", 512)),
             output_stride=int(config.get("output_stride", 4)),
+            batch_size=8,
+            use_amp=True,
         )
 
         tb_writer = SummaryWriter(log_dir=str(ds_output_dir / "tensorboard"))
@@ -526,6 +536,7 @@ def train_single_dataset(
                 val_metrics = evaluate_dataset_split(
                     model, val_dataset, tiler, args.device, ds_output_dir,
                     split_name="val", save_scatter=args.save_scatter, num_vis=args.num_vis,
+                    config=config,
                 )
                 result.best_val_mae = val_metrics.get("mae")
                 result.best_val_rmse = val_metrics.get("rmse")
@@ -536,6 +547,7 @@ def train_single_dataset(
                 test_metrics = evaluate_dataset_split(
                     model, test_dataset, tiler, args.device, ds_output_dir,
                     split_name="test", save_scatter=args.save_scatter, num_vis=args.num_vis,
+                    config=config,
                 )
                 result.test_mae = test_metrics.get("mae")
                 result.test_rmse = test_metrics.get("rmse")
@@ -664,6 +676,8 @@ def run_joint_mode(
         tile_size=int(config.get("inference", {}).get("tile_size", 640)),
         tile_stride=int(config.get("inference", {}).get("tile_stride", 512)),
         output_stride=int(config.get("output_stride", 4)),
+        batch_size=8,
+        use_amp=True,
     )
 
     tb_writer = SummaryWriter(log_dir=str(joint_output_dir / "tensorboard"))
@@ -708,6 +722,7 @@ def run_joint_mode(
             val_m = evaluate_dataset_split(
                 model, val_datasets_map[spec.name], tiler, args.device, ds_eval_dir,
                 split_name="val", save_scatter=args.save_scatter, num_vis=args.num_vis,
+                config=config,
             )
             res.val_samples = len(val_datasets_map[spec.name])
             res.best_val_mae = val_m.get("mae")
@@ -718,6 +733,7 @@ def run_joint_mode(
             test_m = evaluate_dataset_split(
                 model, test_datasets_map[spec.name], tiler, args.device, ds_eval_dir,
                 split_name="test", save_scatter=args.save_scatter, num_vis=args.num_vis,
+                config=config,
             )
             res.test_samples = len(test_datasets_map[spec.name])
             res.test_mae = test_m.get("mae")
@@ -753,6 +769,8 @@ def run_eval_only_mode(
         tile_size=int(config.get("inference", {}).get("tile_size", 640)),
         tile_stride=int(config.get("inference", {}).get("tile_stride", 512)),
         output_stride=int(config.get("output_stride", 4)),
+        batch_size=8,
+        use_amp=True,
     )
 
     for spec in specs:
@@ -795,7 +813,7 @@ def run_eval_only_mode(
             try:
                 val_ds = CrowdDataset(spec.root, split=spec.val_split, crop_size=int(config["image_size"]), output_stride=int(config["output_stride"]), dynamic_crop=False, augment=False)
                 res.val_samples = len(val_ds)
-                val_m = evaluate_dataset_split(model, val_ds, tiler, args.device, ds_out_dir, split_name="val", save_scatter=args.save_scatter, num_vis=args.num_vis)
+                val_m = evaluate_dataset_split(model, val_ds, tiler, args.device, ds_out_dir, split_name="val", save_scatter=args.save_scatter, num_vis=args.num_vis, config=config)
                 res.best_val_mae = val_m.get("mae")
                 res.best_val_rmse = val_m.get("rmse")
                 res.best_val_nae = val_m.get("nae")
@@ -807,7 +825,7 @@ def run_eval_only_mode(
             try:
                 test_ds = CrowdDataset(spec.root, split=spec.test_split, crop_size=int(config["image_size"]), output_stride=int(config["output_stride"]), dynamic_crop=False, augment=False)
                 res.test_samples = len(test_ds)
-                test_m = evaluate_dataset_split(model, test_ds, tiler, args.device, ds_out_dir, split_name="test", save_scatter=args.save_scatter, num_vis=args.num_vis)
+                test_m = evaluate_dataset_split(model, test_ds, tiler, args.device, ds_out_dir, split_name="test", save_scatter=args.save_scatter, num_vis=args.num_vis, config=config)
                 res.test_mae = test_m.get("mae")
                 res.test_rmse = test_m.get("rmse")
                 res.test_nae = test_m.get("nae")
