@@ -122,14 +122,15 @@ def main() -> None:
         device=args.device,
         base_lr=float(train_cfg["learning_rate"]),
         weight_decay=float(train_cfg["weight_decay"]),
+        backbone_high_multiplier=float(train_cfg.get("backbone_high_multiplier", 0.02)),
+        backbone_low_multiplier=float(train_cfg.get("backbone_low_multiplier", 0.005)),
         freeze_scheduler=freeze,
     )
     epochs = int(args.epochs if args.epochs is not None else train_cfg["epochs"])
 
     val_split = data_cfg.get("val_split", "val")
-    val_image_dir = root / "images" / val_split
     val_dataset = None
-    if val_image_dir.exists():
+    try:
         val_dataset = CrowdDataset(
             root,
             val_split,
@@ -141,9 +142,9 @@ def main() -> None:
         logger.info(
             f"Validation dataset initialized from {root} (split: '{val_split}', samples: {len(val_dataset)})"
         )
-    else:
+    except FileNotFoundError as exc:
         logger.warning(
-            f"Validation directory not found at '{val_image_dir}'. Periodic evaluation will be skipped."
+            f"Validation dataset split '{val_split}' not found at '{root}': {exc}. Periodic evaluation will be skipped."
         )
 
     tiler = DensityTiler(

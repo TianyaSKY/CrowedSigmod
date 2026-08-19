@@ -27,6 +27,8 @@ class CrowdTrainer:
         device: str | torch.device = "cpu",
         base_lr: float = 1e-3,
         weight_decay: float = 1e-4,
+        backbone_high_multiplier: float = 0.02,
+        backbone_low_multiplier: float = 0.005,
         freeze_scheduler: FreezeScheduler | None = None,
         grad_clip_norm: float | None = None,
     ) -> None:
@@ -35,15 +37,21 @@ class CrowdTrainer:
         self.criterion = criterion.to(self.device)
         self.freeze_scheduler = freeze_scheduler or FreezeScheduler()
         self.freeze_scheduler.apply(self.model, 0)
+        self.weight_decay = float(weight_decay)
+        self.backbone_high_multiplier = float(backbone_high_multiplier)
+        self.backbone_low_multiplier = float(backbone_low_multiplier)
         self.optimizer = build_optimizer(
             self.model,
             base_lr=base_lr,
             weight_decay=weight_decay,
+            backbone_high_multiplier=self.backbone_high_multiplier,
+            backbone_low_multiplier=self.backbone_low_multiplier,
         )
         self.grad_clip_norm = grad_clip_norm
         self.start_epoch = 0
         self.best_metric = float("inf")
         self.best_epoch = -1
+
 
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         moved = dict(batch)
@@ -205,7 +213,13 @@ class CrowdTrainer:
             # 新启用的骨干网络参数需要新的参数组。显式重建可确保
             # 在阶段切换边界处学习率乘数保持正确。
             if epoch == self.start_epoch or phase.value != getattr(self, "_last_phase", None):
-                self.optimizer = build_optimizer(self.model, base_lr=self.optimizer.defaults["lr"])
+                self.optimizer = build_optimizer(
+                    self.model,
+                    base_lr=self.optimizer.defaults["lr"],
+                    weight_decay=self.weight_decay,
+                    backbone_high_multiplier=self.backbone_high_multiplier,
+                    backbone_low_multiplier=self.backbone_low_multiplier,
+                )
             self._last_phase = phase.value
             if scheduler is not None:
                 scheduler.step()
@@ -378,7 +392,13 @@ class CrowdTrainer:
 
         if "optimizer" in checkpoint:
             # 恢复与检查点所在阶段相匹配的参数组结构，再加载优化器状态
-            self.optimizer = build_optimizer(self.model, base_lr=self.optimizer.defaults.get("lr", 1e-3))
+            self.optimizer = build_optimizer(
+                self.model,
+                base_lr=self.optimizer.defaults.get("lr", 1e-3),
+                weight_decay=self.weight_decay,
+                backbone_high_multiplier=self.backbone_high_multiplier,
+                backbone_low_multiplier=self.backbone_low_multiplier,
+            )
             self.optimizer.load_state_dict(checkpoint["optimizer"])
         if "best_metric" in checkpoint:
             self.best_metric = float(checkpoint["best_metric"])

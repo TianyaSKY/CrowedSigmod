@@ -6,8 +6,8 @@ output_stride: 4
 model:
   # YOLO 主干配置文件，可整体替换以换用不同规模的主干。
   backbone: yolo11n.yaml
-  # null = 随机初始化，不加载预训练权重；否则为权重文件路径。
-  pretrained: null
+  # 预训练权重路径（加载 COCO 预训练特征提升抗退化能力）
+  pretrained: yolo11n.pt
   use_ultralytics: true
   # P2/P3/P4 投影融合后的特征通道数，PGMD 各分支共用。
   fusion_channels: 128
@@ -40,18 +40,20 @@ loss:
 
 training:
   epochs: 100
-  # 前 freeze_epochs 个 epoch 冻结主干，仅训练检测头。
-  freeze_epochs: 10
-  # 阶段切换点：epoch 达到 partial_unfreeze_epoch 进入部分解冻，
-  # 达到 full_unfreeze_epoch 完全解冻。
-  partial_unfreeze_epoch: 10
-  full_unfreeze_epoch: 30
+  # 阶段切换点：前 freeze_epochs 个 epoch 冻结主干稳定 Head，逐步解冻
+  freeze_epochs: 15
+  partial_unfreeze_epoch: 15
+  full_unfreeze_epoch: 45
   batch_size: 4
   workers: 4
-  learning_rate: 0.002
+  # 适中的基础学习率（微调场景推荐 5e-4）
+  learning_rate: 0.0005
   weight_decay: 0.0001
+  # 解冻后骨干网络学习率乘数（高层 0.02×，低层 0.005×，防止冲毁预训练特征）
+  backbone_high_multiplier: 0.02
+  backbone_low_multiplier: 0.005
   # 学习率预热轮数：线性升至峰值后再按余弦衰减。
-  warmup_epochs: 3
+  warmup_epochs: 5
   # 验证评估频率（每隔多少个 epoch 执行一次全图验证）
   val_interval: 1
 

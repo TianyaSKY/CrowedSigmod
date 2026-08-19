@@ -2,7 +2,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import torch
 import yaml
