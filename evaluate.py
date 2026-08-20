@@ -83,9 +83,6 @@ def main() -> None:
         for index in range(len(dataset)):
             yield dataset.full_image(index)
 
-    metrics, detailed_records = evaluate_tiled(
-        model,
-        _samples(),
     tiler = DensityTiler(
         tile_size=int(config["inference"]["tile_size"]),
         tile_stride=int(config["inference"]["tile_stride"]),
